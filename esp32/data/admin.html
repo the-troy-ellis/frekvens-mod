@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frekvens Controller</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1><a href="index.html" class="home-link">Frekvens</a> <span class="crumb">· Admin</span></h1>
+    <div class="status-bar">
+      <a href="play.html" class="chip chip-link">Play →</a>
+      <span id="conn-status" class="chip offline">Connecting…</span>
+      <span id="ip-label" class="chip"></span>
+    </div>
+  </header>
+
+  <div class="main-grid">
+    <!-- Live preview -->
+    <section class="panel preview-panel">
+      <h2>Live Frekvens Preview</h2>
+      <div class="canvas-wrap">
+        <canvas id="preview" width="160" height="160"></canvas>
+      </div>
+      <div class="brightness-row">
+        <label>Brightness</label>
+        <input type="range" id="brightness" min="0" max="255" value="255">
+        <span id="brightness-val">255</span>
+      </div>
+      <label class="power-row">
+        <input type="checkbox" id="power" checked>
+        <span>Power</span>
+      </label>
+    </section>
+
+    <!-- Mode selector + controls -->
+    <section class="panel controls-panel">
+      <h2>Mode</h2>
+      <div class="tabs" id="mode-tabs">
+        <button class="tab active" data-mode="text">Text</button>
+        <button class="tab"        data-mode="clock">Clock</button>
+        <button class="tab"        data-mode="weather">Weather</button>
+        <button class="tab"        data-mode="image">Image</button>
+        <button class="tab"        data-mode="animation">Animation</button>
+        <button class="tab"        data-mode="effects">Effects</button>
+        <button class="tab"        data-mode="zones">Zones</button>
+        <button class="tab"        data-mode="draw">Draw</button>
+        <button class="tab"        data-mode="off">Off</button>
+      </div>
+
+      <!-- Text mode -->
+      <div class="mode-pane active" id="pane-text">
+        <label>Message
+          <input type="text" id="text-input" maxlength="255" placeholder="Hello World">
+        </label>
+        <label>Scroll speed (ms/px)
+          <input type="number" id="scroll-ms" min="20" max="500" value="80">
+        </label>
+
+        <h3>Scroll mode</h3>
+        <div class="scroll-mode-grid" id="text-scroll-mode">
+          <button type="button" class="segmented-btn active" data-mode="horizontal_west">Horizontal &#8592;</button>
+          <button type="button" class="segmented-btn" data-mode="horizontal_north">Horizontal &#8593;</button>
+          <button type="button" class="segmented-btn" data-mode="horizontal_south">Horizontal &#8595;</button>
+          <button type="button" class="segmented-btn" data-mode="vertical_north">Vertical &#8593;</button>
+          <button type="button" class="segmented-btn" data-mode="vertical_south">Vertical &#8595;</button>
+        </div>
+
+        <h3>Options</h3>
+        <label class="inline-check">
+          <input type="checkbox" id="text-static">
+          Static (no scrolling; centered — direction sets horizontal vs vertical layout)
+        </label>
+        <label class="inline-check">
+          <input type="checkbox" id="text-once">
+          Scroll once, then turn off
+        </label>
+        <label>Loop gap (extra blank px between repeats)
+          <input type="number" id="text-gap" min="0" max="64" value="0">
+        </label>
+
+        <button class="btn-primary" id="send-text">Send</button>
+      </div>
+
+      <!-- Clock mode -->
+      <div class="mode-pane" id="pane-clock">
+        <p class="hint">Hours over minutes with a blinking colon. Time comes from NTP —
+        set your timezone in Settings (empty = UTC).</p>
+        <h3>Format</h3>
+        <div class="segmented" id="clock-format">
+          <button type="button" class="segmented-btn active" data-h24="1">24-hour</button>
+          <button type="button" class="segmented-btn" data-h24="0">12-hour</button>
+        </div>
+        <button class="btn-primary" id="send-clock">Show Clock</button>
+      </div>
+
+      <!-- Weather mode -->
+      <div class="mode-pane" id="pane-weather">
+        <p class="hint">The panel as a tiny window on the sky. "Live" tracks your Home Assistant
+        forecast automatically; the rest are manual scenes to preview.</p>
+        <div class="scroll-mode-grid weather-grid" id="weather-grid">
+          <button type="button" class="segmented-btn" data-cond="auto">Live &#127756;</button>
+          <button type="button" class="segmented-btn" data-cond="sunny">Sun</button>
+          <button type="button" class="segmented-btn" data-cond="clear-night">Night</button>
+          <button type="button" class="segmented-btn" data-cond="partlycloudy">Partly</button>
+          <button type="button" class="segmented-btn" data-cond="cloudy">Clouds</button>
+          <button type="button" class="segmented-btn" data-cond="fog">Fog</button>
+          <button type="button" class="segmented-btn" data-cond="rainy">Rain</button>
+          <button type="button" class="segmented-btn" data-cond="snowy">Snow</button>
+          <button type="button" class="segmented-btn" data-cond="snowy-rainy">Sleet</button>
+          <button type="button" class="segmented-btn" data-cond="lightning">Storm</button>
+          <button type="button" class="segmented-btn" data-cond="windy">Wind</button>
+        </div>
+      </div>
+
+      <!-- Image mode -->
+      <div class="mode-pane" id="pane-image">
+        <p class="hint">Upload a PNG/JPEG. It will be resized to the canvas (your panel arrangement's bounding box) and converted to 8-bit grayscale.</p>
+        <label class="file-label">
+          Choose file
+          <input type="file" id="img-file" accept="image/*">
+        </label>
+        <label class="inline-check">
+          <input type="checkbox" id="img-invert">
+          Invert (swap dark/light)
+        </label>
+        <div id="img-preview-wrap" style="display:none">
+          <canvas id="img-preview" width="160" height="160"></canvas>
+        </div>
+        <button class="btn-primary" id="upload-img" disabled>Upload &amp; Display</button>
+        <hr>
+        <h3>Saved images</h3>
+        <ul id="image-list" class="file-list"></ul>
+      </div>
+
+      <!-- Animation mode -->
+      <div class="mode-pane" id="pane-animation">
+        <p class="hint">Upload a GIF. Each frame will be extracted and stored. Max 64KB total.</p>
+        <label class="file-label">
+          Choose GIF
+          <input type="file" id="anim-file" accept="image/gif">
+        </label>
+        <label>Frame delay (ms)
+          <input type="number" id="anim-frame-ms" min="20" max="2000" value="100">
+        </label>
+        <label class="inline-check">
+          <input type="checkbox" id="anim-loop" checked>
+          Loop
+        </label>
+        <label class="inline-check">
+          <input type="checkbox" id="anim-invert">
+          Invert (swap dark/light)
+        </label>
+        <div class="brightness-row">
+          <label>Grey levels</label>
+          <input type="range" id="anim-levels" min="2" max="17" value="17">
+          <span id="anim-levels-val">Off</span>
+        </div>
+        <p class="hint">Slide left to collapse the animation into fewer, clearer shades. Applied when you upload.</p>
+        <button class="btn-primary" id="upload-anim" disabled>Upload &amp; Play</button>
+        <hr>
+        <h3>Saved animations</h3>
+        <ul id="anim-list" class="file-list"></ul>
+      </div>
+
+      <!-- Effects mode -->
+      <div class="mode-pane" id="pane-effects">
+        <p class="hint">Built-in generative effects, rendered live on the device — nothing to upload.</p>
+
+        <h3>Toys</h3>
+        <div class="scroll-mode-grid effect-grid">
+          <button type="button" class="segmented-btn" data-effect="__snake__">Snake</button>
+          <button type="button" class="segmented-btn" data-effect="__pong__">Pong</button>
+          <button type="button" class="segmented-btn" data-effect="__bounce__">Bounce</button>
+          <button type="button" class="segmented-btn" data-effect="__sand__">Sand</button>
+          <button type="button" class="segmented-btn" data-effect="__life__">Life</button>
+          <button type="button" class="segmented-btn" data-effect="__heart__">Heart</button>
+          <button type="button" class="segmented-btn" data-effect="__critter__" title="Pip patrols on demand (he also wanders by on his own when the display is idle)">Pip</button>
+        </div>
+
+        <h3>Synth</h3>
+        <div class="scroll-mode-grid effect-grid">
+          <button type="button" class="segmented-btn" data-effect="__bars__">VU Bars</button>
+          <button type="button" class="segmented-btn" data-effect="__scope__">Scope</button>
+          <button type="button" class="segmented-btn" data-effect="__disco__">Party</button>
+        </div>
+
+        <h3>Nature</h3>
+        <div class="scroll-mode-grid effect-grid">
+          <button type="button" class="segmented-btn" data-effect="__rain__">Rain</button>
+          <button type="button" class="segmented-btn" data-effect="__fire__">Fire</button>
+          <button type="button" class="segmented-btn" data-effect="__ripple__">Ripples</button>
+          <button type="button" class="segmented-btn" data-effect="__blobs__">Lava</button>
+          <button type="button" class="segmented-btn" data-effect="__sparkle__">Sparkle</button>
+          <button type="button" class="segmented-btn" data-effect="__fireworks__">Boom</button>
+        </div>
+
+        <h3>Space &amp; signal</h3>
+        <div class="scroll-mode-grid effect-grid">
+          <button type="button" class="segmented-btn" data-effect="__warp__">Warp</button>
+          <button type="button" class="segmented-btn" data-effect="__radar__">Radar</button>
+          <button type="button" class="segmented-btn" data-effect="__plasma__">Plasma</button>
+          <button type="button" class="segmented-btn" data-effect="__static__">No Signal</button>
+          <button type="button" class="segmented-btn" data-effect="__sweep__">Sweep</button>
+        </div>
+
+        <label>Speed (ms/frame)
+          <input type="number" id="effect-ms" min="20" max="500" value="80">
+        </label>
+        <p class="hint">Click an effect to play it. Speed changes apply the next time you click.
+        Try Snake or Pong slow (~120), Warp and Party fast (~50).</p>
+      </div>
+
+      <!-- Zones mode -->
+      <div class="mode-pane" id="pane-zones">
+        <p class="hint">Run different content on each physical panel at once — clock on one,
+        Game of Life on another, Pong on a third, weather on a fourth. Turn on
+        <strong>Zone mode</strong> in Settings first, then assign each panel below —
+        assignments apply immediately, no save needed.</p>
+        <p class="hint" id="zone-mode-warning" style="display:none">
+          Zone mode is off — turn it on in Settings to see zone content on the panel.
+          Assignments made here are saved either way.</p>
+        <div id="zone-rows"></div>
+        <p class="hint">Weather, Effect, and Game content each share one engine, so only
+        ONE zone at a time can run each of those — set the other zone back to Off first to
+        move it. Clock/Image/Text have no such limit.</p>
+      </div>
+
+      <!-- Draw mode -->
+      <div class="mode-pane" id="pane-draw">
+        <p class="hint">Left button paints, right button erases, Alt-click picks a color.
+        Keys: B/E/L/R/F tools, arrows nudge, Ctrl+Z undo.</p>
+
+        <div class="tool-row" id="draw-tools">
+          <button type="button" class="tool-btn active" data-tool="brush"    title="Brush (B)">Brush</button>
+          <button type="button" class="tool-btn" data-tool="eraser"   title="Eraser (E)">Erase</button>
+          <button type="button" class="tool-btn" data-tool="line"     title="Line (L)">Line</button>
+          <button type="button" class="tool-btn" data-tool="rect"     title="Rectangle (R)">Rect</button>
+          <button type="button" class="tool-btn" data-tool="rectfill" title="Filled rectangle">Box</button>
+          <button type="button" class="tool-btn" data-tool="circle"   title="Ellipse">Ring</button>
+          <button type="button" class="tool-btn" data-tool="fill"     title="Flood fill (F)">Fill</button>
+          <button type="button" class="tool-btn" data-tool="pick"     title="Eyedropper (Alt-click)">Pick</button>
+        </div>
+        <div class="tool-row" id="draw-toggles">
+          <button type="button" class="tool-btn" id="draw-mirror-h" title="Mirror left-right while painting">Mirror H</button>
+          <button type="button" class="tool-btn" id="draw-mirror-v" title="Mirror top-bottom while painting">Mirror V</button>
+          <button type="button" class="tool-btn" id="draw-dither"   title="Paint on alternating pixels (checkerboard shading)">Dither</button>
+          <button type="button" class="tool-btn" id="draw-live"     title="Paint straight onto the physical panel as you draw">Live&nbsp;⚡</button>
+        </div>
+
+        <div class="swatch-line">
+          <div id="draw-swatches" class="swatch-row"></div>
+          <input type="number" id="draw-brush-val" min="0" max="255" value="255" title="Exact brush value (0-255)">
+        </div>
+
+        <div class="canvas-wrap">
+          <canvas id="draw-canvas" width="160" height="160"></canvas>
+        </div>
+        <div class="hint" id="draw-readout">&nbsp;</div>
+
+        <div class="draw-actions">
+          <button class="btn-secondary" id="draw-undo" title="Undo (Ctrl+Z)">Undo</button>
+          <button class="btn-secondary" id="draw-redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+          <button class="btn-secondary" id="draw-clear" title="Clear this frame to black">Clear</button>
+          <button class="btn-secondary" id="draw-fill-white" title="Fill this frame with the brush value">Flood</button>
+        </div>
+        <div class="draw-actions">
+          <button class="btn-secondary nudge" id="draw-left"  title="Nudge left (wraps)">&#8592;</button>
+          <button class="btn-secondary nudge" id="draw-right" title="Nudge right">&#8594;</button>
+          <button class="btn-secondary nudge" id="draw-up"    title="Nudge up">&#8593;</button>
+          <button class="btn-secondary nudge" id="draw-down"  title="Nudge down">&#8595;</button>
+          <button class="btn-secondary" id="draw-flip-h">Flip H</button>
+          <button class="btn-secondary" id="draw-flip-v">Flip V</button>
+          <button class="btn-secondary" id="draw-rot">Rot 90</button>
+          <button class="btn-secondary" id="draw-invert">Invert</button>
+        </div>
+
+        <div class="draw-stamp-row">
+          <input type="text" id="draw-stamp-text" maxlength="24" placeholder="text to stamp">
+          <button class="btn-secondary" id="draw-stamp">Stamp</button>
+        </div>
+
+        <div class="draw-actions">
+          <label class="file-label" style="margin-bottom:0">Import image
+            <input type="file" id="draw-import" accept="image/*">
+          </label>
+          <button class="btn-secondary" id="draw-export-png" title="Download as a scaled-up PNG">PNG</button>
+          <button class="btn-secondary" id="draw-export-file" title="Download the raw .raw / .anim file">.raw/.anim</button>
+        </div>
+
+        <hr>
+        <h3>Frames</h3>
+        <p class="hint">One frame sends as a still image; two or more send as a looping animation.
+        Click a frame to edit it — changes save into the selected frame automatically.</p>
+        <div id="frame-strip"></div>
+        <div class="draw-frame-row">
+          <button class="btn-secondary" id="frame-add"  title="Duplicate the selected frame and edit the copy">+ Add</button>
+          <button class="btn-secondary" id="frame-del"  title="Delete the selected frame">Delete</button>
+          <button class="btn-secondary" id="frame-prev" title="Move frame earlier">&#8592; Move</button>
+          <button class="btn-secondary" id="frame-next" title="Move frame later">Move &#8594;</button>
+        </div>
+        <div class="draw-frame-row">
+          <label class="frame-delay-label">Delay (ms)
+            <input type="number" id="draw-anim-delay" min="20" max="10000" value="100" title="Delay for the SELECTED frame">
+          </label>
+          <label class="inline-check"><input type="checkbox" id="draw-onion" checked> Onion skin</label>
+          <label class="inline-check"><input type="checkbox" id="draw-pingpong"> Ping-pong</label>
+        </div>
+
+        <div id="draw-anim-preview-wrap" style="display:none">
+          <h3>Preview</h3>
+          <div class="draw-frame-row">
+            <button class="btn-secondary" id="prev-play" title="Play / pause">&#9654;/&#10074;&#10074;</button>
+            <button class="btn-secondary" id="prev-step-b" title="Step back">&#8676;</button>
+            <button class="btn-secondary" id="prev-step-f" title="Step forward">&#8677;</button>
+          </div>
+          <canvas id="draw-anim-preview" width="160" height="160"></canvas>
+        </div>
+
+        <label>Name
+          <input type="text" id="draw-name" maxlength="24" placeholder="drawing">
+        </label>
+        <div class="draw-actions">
+          <button class="btn-secondary" id="draw-preview-anim">Preview on Panel</button>
+          <button class="btn-primary" id="draw-send">Send</button>
+        </div>
+      </div>
+
+      <!-- Off mode -->
+      <div class="mode-pane" id="pane-off">
+        <p>Display is off.</p>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section class="panel settings-panel">
+      <h2>Settings</h2>
+      <div class="settings-form">
+        <label>Device name
+          <input type="text" id="cfg-name" maxlength="31">
+        </label>
+        <label>Number of panels
+          <input type="number" id="cfg-panels" min="1" max="4" value="1">
+        </label>
+
+        <h3>Panel arrangement</h3>
+        <p class="hint">Position each panel (in pixels, chain order = cable order from the
+        ESP32). Leave space for anything sitting between panels — content scrolls
+        "behind" gaps. Rotation is the physical mounting rotation, clockwise.
+        Use Identify to see each panel's chain number with a tick on its top edge.</p>
+        <div id="layout-rows"></div>
+        <div class="layout-preview-wrap">
+          <canvas id="layout-preview" width="160" height="160"></canvas>
+        </div>
+        <button type="button" class="btn-secondary" id="identify-btn">Identify panels</button>
+
+        <label>Timezone (POSIX TZ, for the clock)
+          <input type="text" id="cfg-tz" maxlength="47" placeholder="e.g. PST8PDT,M3.2.0,M11.1.0 — empty = UTC">
+        </label>
+        <label class="inline-check">
+          <input type="checkbox" id="cfg-gamma">
+          Gamma correction (perceptual brightness for images/effects)
+        </label>
+        <label class="inline-check">
+          <input type="checkbox" id="cfg-critter" checked>
+          Pip, the idle critter (wanders across a calm display now and then)
+        </label>
+        <label class="inline-check">
+          <input type="checkbox" id="cfg-zone-mode">
+          Zone mode (each panel runs its own content — see the Zones tab)
+        </label>
+        <fieldset>
+          <legend>MQTT (Home Assistant)</legend>
+          <label class="inline-check">
+            <input type="checkbox" id="cfg-mqtt-enabled">
+            Enable MQTT
+          </label>
+          <label>Broker host
+            <input type="text" id="cfg-mqtt-broker" placeholder="192.168.1.x">
+          </label>
+          <label>Port
+            <input type="number" id="cfg-mqtt-port" value="1883">
+          </label>
+          <label>Username
+            <input type="text" id="cfg-mqtt-user">
+          </label>
+          <label>Password
+            <input type="password" id="cfg-mqtt-pass">
+          </label>
+        </fieldset>
+        <button class="btn-secondary" id="save-cfg">Save settings</button>
+
+        <hr>
+        <h3>Device</h3>
+        <div class="storage-bar"><div id="storage-fill"></div></div>
+        <div class="hint" id="device-info">Loading…</div>
+      </div>
+    </section>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

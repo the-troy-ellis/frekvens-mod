@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Raid 16 — Decks</title>
+<link rel="stylesheet" href="style.css">
+<style>
+/* ==== Raid deck styles, layered on the TE theme (style.css) ==== */
+.raid { max-width: 520px; margin: 0 auto; padding: 12px 16px 40px;
+        display: flex; flex-direction: column; gap: 12px; }
+.raid-banner { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-dim); border: 1px dashed var(--border); border-radius: 6px;
+  padding: 6px 10px; text-align: center; }
+
+/* boss + anim strips */
+.boss-strip { display: flex; gap: 5px; }
+.boss-strip .segmented-btn { padding: 10px 2px; font-size: 10px; }
+.anim-grid { display: flex; flex-wrap: wrap; gap: 5px; }
+.anim-grid .segmented-btn { flex: 1 1 30%; }
+
+/* cockpit header — shared frame above whichever deck is open */
+.cockpit { display: flex; flex-direction: column; gap: 6px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 12px; }
+.nameplate { display: flex; align-items: baseline; gap: 8px; }
+.np-name { font-size: 16px; font-weight: 700; letter-spacing: 0.08em; }
+.np-epithet { font-size: 10px; color: var(--accent2); text-transform: lowercase; }
+.cockpit-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.phase-pips { display: flex; gap: 4px; }
+.pip { width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--border); }
+.pip.on { background: var(--accent); border-color: var(--accent2); }
+.hull-leds { display: flex; gap: 3px; }
+.hled { width: 9px; height: 12px; border-radius: 2px; background: var(--accent);
+  border: 1px solid var(--accent2); }
+.hled.off { background: var(--surface); border-color: var(--border); }
+.lane-tag { margin-left: auto; font-size: 10px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; }
+
+/* deck tabs + panes */
+.deck-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.deck-tabs .tab { flex: 1; text-align: center; padding: 8px 2px; font-size: 10px; }
+.deck { display: none; flex-direction: column; gap: 12px; }
+.deck.active { display: flex; }
+.deck-head { font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--text-dim); }
+.deck-head b { color: var(--accent); }
+
+/* --- shield: the breaker panel --- */
+.hazard { height: 6px; border-radius: 3px;
+  background: repeating-linear-gradient(-45deg, var(--accent) 0 8px, var(--ink) 8px 16px); }
+.seesaw { display: flex; gap: 0; border-radius: 12px; overflow: visible;
+  transition: transform 0.08s; }
+.seesaw.tilt-l { transform: rotate(-3deg); }
+.seesaw.tilt-r { transform: rotate(3deg); }
+.seesaw .bigbtn { flex: 1; padding: 30px 10px; font-size: 16px; }
+.seesaw .bigbtn:first-child { border-radius: 12px 0 0 12px; }
+.seesaw .bigbtn:last-child  { border-radius: 0 12px 12px 0; }
+.knob-wrap { display: flex; align-items: center; gap: 18px; justify-content: center; }
+#freq-knob { width: 110px; height: 110px; border-radius: 50%; position: relative;
+  background: var(--surface2); border: 1px solid var(--border);
+  box-shadow: 0 4px 0 var(--edge); touch-action: none; }
+#freq-knob .stem { position: absolute; left: 50%; top: 50%; width: 4px; height: 44px;
+  background: var(--ink); border-radius: 2px; transform-origin: 50% 0;
+  transform: rotate(0deg); }
+#freq-knob .stem::after { content: ""; position: absolute; bottom: -2px; left: -3px;
+  width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+.knob-detents { display: flex; flex-direction: column; gap: 8px; }
+.knob-detents span { font-size: 12px; font-weight: 700; color: var(--text-dim);
+  border: 1px solid transparent; border-radius: 4px; padding: 1px 8px; }
+.knob-detents span.on { color: var(--ink); border-color: var(--accent);
+  background: var(--accent); }
+.pullbar { position: relative; overflow: hidden; }
+.pullbar .fill { position: absolute; inset: 0; width: 0%;
+  background: var(--accent); opacity: 0.5; transition: width 0.1s linear; }
+.cap-gauge { height: 8px; border-radius: 4px; background: var(--surface2);
+  border: 1px solid var(--border); overflow: hidden; }
+.cap-gauge > div { height: 100%; width: 100%; background: var(--accent); }
+
+/* --- gunner: the artillery station --- */
+.crank-wrap { display: flex; align-items: center; gap: 16px; justify-content: center; }
+#crank { width: 130px; height: 130px; border-radius: 50%;
+  border: 1px solid var(--border); box-shadow: 0 4px 0 var(--edge);
+  background: conic-gradient(var(--accent) 0deg, var(--surface2) 0deg);
+  display: flex; align-items: center; justify-content: center;
+  touch-action: none; user-select: none; font-size: 11px; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.1em; text-align: center;
+  position: relative; }
+#crank::before { content: ""; position: absolute; inset: 6px; border-radius: 50%;
+  background:
+    repeating-conic-gradient(transparent 0 28deg, var(--border) 28deg 30deg);
+  -webkit-mask: radial-gradient(transparent 58%, #000 60%);
+          mask: radial-gradient(transparent 58%, #000 60%); }
+.breach-tray { display: flex; align-items: center; justify-content: center; gap: 16px;
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px; }
+.shell { border-radius: 4px 10px 10px 4px; border: 1px solid var(--border);
+  background: var(--surface); }
+.shell.ping  { width: 26px; height: 16px; }
+.shell.heavy { width: 44px; height: 16px; }
+.shell.loaded { background: var(--accent); border-color: var(--accent2); }
+.shell-lbl { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-dim); text-align: center; }
+.aim-strip { display: flex; justify-content: center; gap: 6px; margin-top: 4px; }
+.lamp { width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--border); }
+.lamp.on { background: var(--accent); border-color: var(--accent2); }
+.fire-rig { position: relative; }
+#fire-cover { position: absolute; inset: 0; z-index: 2; border-radius: 14px;
+  background: repeating-linear-gradient(-45deg, var(--surface2) 0 10px, var(--surface) 10px 20px);
+  border: 1px solid var(--border); display: flex; align-items: center;
+  justify-content: center; font-size: 10px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--text-dim);
+  transition: transform 0.18s, opacity 0.18s; transform-origin: left center; }
+#fire-cover.open { transform: rotateY(70deg) translateX(-8px); opacity: 0; pointer-events: none; }
+.deck.kick { animation: kick 0.18s; }
+@keyframes kick { 30% { transform: translateY(4px); } }
+
+/* --- hacker: the terminal --- */
+.crt { background: var(--screen); border-radius: 8px; border: 5px solid var(--screen);
+  box-shadow: inset 0 0 0 1px #000; padding: 10px 12px; overflow: hidden;
+  position: relative; }
+.crt::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(0,0,0,0.25) 3px 4px); }
+.crt .line { font-size: 18px; letter-spacing: 0.5em; white-space: nowrap;
+  color: #f5a623; opacity: 0.4; }
+.crt .line.live { opacity: 1; text-shadow: 0 0 6px #f5a62388; }
+.crt .line.flicker { animation: flick 0.5s infinite; }
+@keyframes flick { 50% { opacity: 0.25; } }
+#waveform { display: block; width: 100%; height: 34px; background: var(--screen);
+  border-radius: 6px; border: 4px solid var(--screen); }
+.scan-rig { position: relative; }
+#scan-arc { position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+  width: 26px; height: 26px; border-radius: 50%;
+  background: conic-gradient(var(--accent) 0deg, transparent 0deg); opacity: 0.9; }
+.codebook { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px; }
+.codebook span { font-size: 13px; color: var(--text); }
+.codebook b { color: var(--accent2); }
+
+/* --- medic: the workbench --- */
+.forge { display: grid; grid-template-columns: repeat(2, 62px); gap: 12px;
+  justify-content: center; }
+.node { width: 62px; height: 62px; border-radius: 50%;
+  background: var(--surface2); border: 1px solid var(--border);
+  box-shadow: 0 3px 0 var(--edge); display: flex; align-items: center;
+  justify-content: center; font-weight: 700; color: var(--text-dim); }
+.node.lit { background: var(--accent); color: var(--ink); border-color: var(--accent2); }
+.tube-rig { position: relative; height: 46px; display: flex; align-items: center;
+  justify-content: center; }
+#capsule { position: absolute; width: 30px; height: 16px; border-radius: 8px;
+  background: var(--accent); border: 1px solid var(--accent2); opacity: 0;
+  transition: transform 0.5s cubic-bezier(0.5,0,1,1), opacity 0.1s 0.45s; }
+#capsule.whoosh { transform: translateY(-70px); opacity: 1; }
+.triage { display: flex; gap: 8px; justify-content: center; }
+.tri-icon { width: 54px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface2); padding: 5px 0; text-align: center;
+  font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-dim); }
+.tri-icon .dot { width: 8px; height: 8px; border-radius: 50%; margin: 0 auto 3px;
+  background: #27b537; }
+.tri-icon.alert .dot { background: var(--accent); animation: flick 0.6s infinite; }
+.wipe-pad { position: relative; height: 100px; border-radius: 8px;
+  background: var(--screen); border: 4px solid var(--screen); touch-action: none; }
+.slime { position: absolute; width: 34px; height: 26px; border-radius: 45%;
+  background: #7ea832; opacity: 0.9; transition: opacity 0.2s; }
+.repair-rig { position: relative; }
+#rep-collar { position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+  width: 26px; height: 26px; border-radius: 50%;
+  background: conic-gradient(var(--accent) 0deg, var(--surface) 0deg); }
+
+/* --- pilot: the cockpit --- */
+.quadrants { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; position: relative; }
+.quad { border: 1px solid var(--border); border-radius: 8px; background: var(--surface2);
+  padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 108px; }
+.quad h4 { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-dim); }
+.quad.alert { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.mini-row { display: flex; gap: 4px; }
+.mini-row .segmented-btn { padding: 8px 2px; font-size: 11px; }
+#alert-diamond { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px;
+  transform: translate(-50%,-50%) rotate(45deg); background: var(--accent);
+  border: 2px solid var(--accent2); z-index: 2; transition: transform 0.3s; }
+.mini-glyph { font-size: 14px; letter-spacing: 0.4em; color: #f5a623;
+  background: var(--screen); border-radius: 4px; padding: 4px 8px; }
+</style>
+</head>
+<body class="play-body">
+<div class="raid">
+  <header class="play-header">
+    <a href="index.html" class="play-back">&#8592;</a>
+    <span class="play-logo">raid 16 &middot; decks</span>
+    <span id="raid-conn" class="chip offline">&hellip;</span>
+  </header>
+
+  <p class="raid-banner">deck review build &mdash; controls are tactile mockups &middot;
+     boss + animation strips drive the real panel</p>
+
+  <!-- boss + animation selection (REAL: drives the display) -->
+  <section class="panel">
+    <h2>boss &mdash; on the panel</h2>
+    <div class="boss-strip" id="boss-strip"></div>
+    <h3>animations</h3>
+    <div class="anim-grid" id="anim-grid"></div>
+    <p class="hint">auto-tours the boss's set every ~6s until you pick. look up.</p>
+  </section>
+
+  <!-- M1 slice: a real, winnable VANTA fight (solo-sim rules) -->
+  <section class="panel">
+    <h2>fight &mdash; vanta &middot; solo sim</h2>
+    <div class="rocker">
+      <button class="btn-primary" id="fight-start" style="flex:1;padding:14px">START FIGHT</button>
+      <button class="btn-secondary" id="fight-stop" style="flex:0 0 90px">stop</button>
+    </div>
+    <p class="hint" id="fight-hint">read the panel: eyes slam a side &rarr; rocker that side.
+      eye-blinks in loops of N &rarr; dial N. mouth opening &rarr; hold OVERCHARGE (or interrupt
+      with a full-crank shot). a clean dial-block opens its mouth &mdash; crank to 100% and FIRE
+      for big damage. top stage row = boss hp &middot; segments below = your hull.</p>
+  </section>
+
+  <!-- cockpit header (shared deck frame) -->
+  <div class="cockpit">
+    <div class="nameplate">
+      <span class="np-name" id="np-name">VANTA</span>
+      <span class="np-epithet" id="np-epithet">the signal titan &middot; mood: cold</span>
+    </div>
+    <div class="cockpit-row">
+      <div class="phase-pips"><span class="pip on"></span><span class="pip"></span><span class="pip"></span></div>
+      <div class="hull-leds" id="hull-leds"></div>
+      <span class="lane-tag">lane 2</span>
+    </div>
+  </div>
+
+  <!-- deck tabs -->
+  <div class="deck-tabs" id="deck-tabs">
+    <button class="tab active" data-d="shl">&#128737; shield</button>
+    <button class="tab" data-d="gun">&#128299; gunner</button>
+    <button class="tab" data-d="hck">&#128225; hacker</button>
+    <button class="tab" data-d="med">&#128295; medic</button>
+    <button class="tab" data-d="pil">&#128640; pilot</button>
+  </div>
+
+  <!-- SHIELD — the breaker panel -->
+  <section class="panel deck active" id="deck-shl">
+    <div class="deck-head">shield engineer &mdash; <b>block what they shout</b></div>
+    <div class="hazard"></div>
+    <h3>deflector side</h3>
+    <div class="seesaw" id="seesaw">
+      <button class="bigbtn" id="shl-l">&#9664; LEFT</button>
+      <button class="bigbtn" id="shl-r">RIGHT &#9654;</button>
+    </div>
+    <h3>frequency selector</h3>
+    <div class="knob-wrap">
+      <div id="freq-knob"><div class="stem" id="knob-stem"></div></div>
+      <div class="knob-detents" id="knob-detents">
+        <span data-f="1">1</span><span data-f="2">2</span>
+        <span data-f="3">3</span><span data-f="4">4</span>
+      </div>
+    </div>
+    <h3>overcharge (hold to arm)</h3>
+    <button class="bigbtn wide pullbar" id="shl-over"><span class="fill" id="over-fill"></span>OVERCHARGE</button>
+    <div class="cap-gauge"><div id="cap-fill"></div></div>
+  </section>
+
+  <!-- GUNNER — the artillery station -->
+  <section class="panel deck" id="deck-gun">
+    <div class="deck-head">weapons loader &mdash; <b>no shell, no shot</b></div>
+    <h3>flywheel</h3>
+    <div class="crank-wrap"><div id="crank"><span>crank<br>0%</span></div></div>
+    <h3>breach</h3>
+    <div class="breach-tray">
+      <div><div class="shell ping" id="shell-ping"></div><div class="shell-lbl">ping</div></div>
+      <div><div class="shell heavy" id="shell-heavy"></div><div class="shell-lbl">heavy</div></div>
+      <button class="btn-secondary" id="mock-load">mock: load</button>
+    </div>
+    <h3>aim</h3>
+    <div class="seesaw" id="aim-seesaw">
+      <button class="bigbtn" id="gun-l">&#9664;</button>
+      <button class="bigbtn" id="gun-r">&#9654;</button>
+    </div>
+    <div class="aim-strip"><span class="lamp" id="lampL"></span><span class="lamp on" id="lampM"></span><span class="lamp" id="lampR"></span></div>
+    <h3>fire control</h3>
+    <div class="fire-rig">
+      <div id="fire-cover">swipe to arm</div>
+      <button class="bigbtn wide" id="fire">FIRE</button>
+    </div>
+  </section>
+
+  <!-- HACKER — the terminal -->
+  <section class="panel deck" id="deck-hck">
+    <div class="deck-head">signal hacker &mdash; <b>the blinks pick the live line</b></div>
+    <h3>telemetry</h3>
+    <div class="crt">
+      <div class="line" id="gl0"></div>
+      <div class="line live" id="gl1"></div>
+      <div class="line" id="gl2"></div>
+    </div>
+    <h3>boss cadence</h3>
+    <canvas id="waveform" width="300" height="26"></canvas>
+    <div class="scan-rig">
+      <button class="bigbtn wide" id="scan">SCAN WEAK SIDE</button>
+      <div id="scan-arc"></div>
+    </div>
+    <h3>codebook (reshuffles every fight)</h3>
+    <div class="codebook" id="codebook"></div>
+  </section>
+
+  <!-- MEDIC — the workbench -->
+  <section class="panel deck" id="deck-med">
+    <div class="deck-head">systems medic &mdash; <b>everyone screams at you</b></div>
+    <h3>triage board</h3>
+    <div class="triage">
+      <div class="tri-icon" id="tri-shl"><div class="dot"></div>shl</div>
+      <div class="tri-icon" id="tri-gun"><div class="dot"></div>gun</div>
+      <div class="tri-icon" id="tri-hck"><div class="dot"></div>hck</div>
+      <div class="tri-icon" id="tri-med"><div class="dot"></div>med</div>
+    </div>
+    <h3>shell forge (trace 1&rarr;4 &middot; 1&rarr;2 = ping)</h3>
+    <div class="forge">
+      <button class="node" data-n="1">1</button><button class="node" data-n="2">2</button>
+      <button class="node" data-n="3">3</button><button class="node" data-n="4">4</button>
+    </div>
+    <div class="tube-rig"><div id="capsule"></div>
+      <button class="btn-primary" id="send-shell" disabled>send to gunner</button></div>
+    <h3>wipe kit</h3>
+    <div class="wipe-pad" id="wipe-pad"></div>
+    <h3>hull repair (hold)</h3>
+    <div class="repair-rig">
+      <button class="bigbtn wide" id="repair">REPAIR</button>
+      <div id="rep-collar"></div>
+    </div>
+  </section>
+
+  <!-- PILOT — the solo cockpit -->
+  <section class="panel deck" id="deck-pil">
+    <div class="deck-head">pilot (solo sim) &mdash; <b>fly the whole gunship</b></div>
+    <div class="quadrants">
+      <div id="alert-diamond"></div>
+      <div class="quad" id="q-shl"><h4>&#128737; shield</h4>
+        <div class="mini-row"><button class="segmented-btn">&#9664;</button><button class="segmented-btn">&#9654;</button></div>
+        <div class="mini-row"><button class="segmented-btn">1</button><button class="segmented-btn">2</button><button class="segmented-btn active">3</button><button class="segmented-btn">4</button></div>
+      </div>
+      <div class="quad" id="q-gun"><h4>&#128299; guns</h4>
+        <div class="mini-row"><button class="segmented-btn">crank</button><button class="segmented-btn">FIRE</button></div>
+        <div class="aim-strip"><span class="lamp"></span><span class="lamp on"></span><span class="lamp"></span></div>
+      </div>
+      <div class="quad" id="q-hck"><h4>&#128225; signal</h4>
+        <div class="mini-glyph" id="mini-glyph">&#9671;&#9670;&#9651;</div>
+        <div class="mini-row"><button class="segmented-btn">scan</button></div>
+      </div>
+      <div class="quad" id="q-med"><h4>&#128295; systems</h4>
+        <div class="mini-row"><button class="segmented-btn">forge</button><button class="segmented-btn">wipe</button></div>
+      </div>
+    </div>
+    <p class="hint">solo removes the decode layer: the boss blinks its frequency
+      openly &mdash; read up, act down. the diamond points at what needs you.</p>
+  </section>
+</div>
+<script src="raid.js"></script>
+</body>
+</html>

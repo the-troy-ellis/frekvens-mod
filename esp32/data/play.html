@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Frekvens — Play</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="play-body">
+<div class="play">
+  <header class="play-header">
+    <a href="index.html" class="play-back">&#8592;</a>
+    <span class="play-logo">FREKVENS · PLAY</span>
+    <span id="play-conn" class="chip offline">…</span>
+  </header>
+
+  <!-- Live mirror of the panel -->
+  <div class="play-screen">
+    <canvas id="play-preview" width="160" height="160"></canvas>
+  </div>
+
+  <!-- Game picker -->
+  <div id="play-picker" class="play-picker">
+    <p class="hint">Pick a game — it starts on the panel and your phone becomes the controller.</p>
+    <div id="game-list" class="game-list"></div>
+  </div>
+
+  <!-- Controller (filled in per game) -->
+  <div id="play-controller" class="play-controller" style="display:none">
+    <div class="controller-bar">
+      <button class="btn-secondary" id="ctrl-back">&#8592; Games</button>
+      <span id="ctrl-title" class="controller-title"></span>
+    </div>
+    <div id="ctrl-body"></div>
+  </div>
+</div>
+<script src="play.js"></script>
+</body>
+</html>

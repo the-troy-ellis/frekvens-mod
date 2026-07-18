@@ -1,0 +1,240 @@
+#pragma once
+// ESPHome custom component for Frekvens LED array.
+// Include path is set via esphome: includes: [frekvens_component.h]
+//
+// Provides:
+//   FrekvensComponent  — drives the ATtiny85 chain over UART
+//   FrekvensLight      — wraps it as an ESPHome LightOutput (brightness + on/off)
+
+#include "esphome.h"
+#include <string.h>
+
+// Protocol constants (must match ATtiny85 firmware)
+static const uint8_t FRK_MAGIC_0  = 0xFE;
+static const uint8_t FRK_MAGIC_1  = 0xED;
+static const uint8_t FRK_FRAME    = 0x01;
+static const uint8_t FRK_SHOW     = 0xFF;
+static const uint8_t FRK_BRIGHT   = 0x02;
+static const uint8_t FRK_CLEAR    = 0x03;
+
+static const uint8_t  FRK_W        = 16;
+static const uint8_t  FRK_H        = 16;
+static const uint8_t  FRK_PLANES   = 8;    // 8-bit depth, 256 brightness levels
+static const uint8_t  FRK_PLANE_B  = 32;   // bytes per plane (256 px / 8 bits)
+static const uint16_t FRK_FRAME_B  = 256;  // planes * plane_bytes
+
+// 5×7 font (ASCII 32–127) — minimal subset for ESPHome scrolling text
+// Same data as font5x7.h in the Arduino firmware.
+static const uint8_t FRK_FONT[96][5] = {
+    {0x00,0x00,0x00,0x00,0x00},{0x00,0x00,0x5F,0x00,0x00},{0x00,0x07,0x00,0x07,0x00},
+    {0x14,0x7F,0x14,0x7F,0x14},{0x24,0x2A,0x7F,0x2A,0x12},{0x23,0x13,0x08,0x64,0x62},
+    {0x36,0x49,0x55,0x22,0x50},{0x00,0x05,0x03,0x00,0x00},{0x00,0x1C,0x22,0x41,0x00},
+    {0x00,0x41,0x22,0x1C,0x00},{0x08,0x2A,0x1C,0x2A,0x08},{0x08,0x08,0x3E,0x08,0x08},
+    {0x00,0x50,0x30,0x00,0x00},{0x08,0x08,0x08,0x08,0x08},{0x00,0x60,0x60,0x00,0x00},
+    {0x20,0x10,0x08,0x04,0x02},{0x3E,0x51,0x49,0x45,0x3E},{0x00,0x42,0x7F,0x40,0x00},
+    {0x42,0x61,0x51,0x49,0x46},{0x21,0x41,0x45,0x4B,0x31},{0x18,0x14,0x12,0x7F,0x10},
+    {0x27,0x45,0x45,0x45,0x39},{0x3C,0x4A,0x49,0x49,0x30},{0x01,0x71,0x09,0x05,0x03},
+    {0x36,0x49,0x49,0x49,0x36},{0x06,0x49,0x49,0x29,0x1E},{0x00,0x36,0x36,0x00,0x00},
+    {0x00,0x56,0x36,0x00,0x00},{0x00,0x08,0x14,0x22,0x41},{0x14,0x14,0x14,0x14,0x14},
+    {0x41,0x22,0x14,0x08,0x00},{0x02,0x01,0x51,0x09,0x06},{0x32,0x49,0x79,0x41,0x3E},
+    {0x7E,0x11,0x11,0x11,0x7E},{0x7F,0x49,0x49,0x49,0x36},{0x3E,0x41,0x41,0x41,0x22},
+    {0x7F,0x41,0x41,0x22,0x1C},{0x7F,0x49,0x49,0x49,0x41},{0x7F,0x09,0x09,0x01,0x01},
+    {0x3E,0x41,0x41,0x51,0x32},{0x7F,0x08,0x08,0x08,0x7F},{0x00,0x41,0x7F,0x41,0x00},
+    {0x20,0x40,0x41,0x3F,0x01},{0x7F,0x08,0x14,0x22,0x41},{0x7F,0x40,0x40,0x40,0x40},
+    {0x7F,0x02,0x04,0x02,0x7F},{0x7F,0x04,0x08,0x10,0x7F},{0x3E,0x41,0x41,0x41,0x3E},
+    {0x7F,0x09,0x09,0x09,0x06},{0x3E,0x41,0x51,0x21,0x5E},{0x7F,0x09,0x19,0x29,0x46},
+    {0x46,0x49,0x49,0x49,0x31},{0x01,0x01,0x7F,0x01,0x01},{0x3F,0x40,0x40,0x40,0x3F},
+    {0x1F,0x20,0x40,0x20,0x1F},{0x3F,0x40,0x38,0x40,0x3F},{0x63,0x14,0x08,0x14,0x63},
+    {0x03,0x04,0x78,0x04,0x03},{0x61,0x51,0x49,0x45,0x43},{0x00,0x00,0x7F,0x41,0x41},
+    {0x02,0x04,0x08,0x10,0x20},{0x41,0x41,0x7F,0x00,0x00},{0x04,0x02,0x01,0x02,0x04},
+    {0x40,0x40,0x40,0x40,0x40},{0x00,0x01,0x02,0x04,0x00},{0x20,0x54,0x54,0x54,0x78},
+    {0x7F,0x48,0x44,0x44,0x38},{0x38,0x44,0x44,0x44,0x20},{0x38,0x44,0x44,0x48,0x7F},
+    {0x38,0x54,0x54,0x54,0x18},{0x08,0x7E,0x09,0x01,0x02},{0x08,0x14,0x54,0x54,0x3C},
+    {0x7F,0x08,0x04,0x04,0x78},{0x00,0x44,0x7D,0x40,0x00},{0x20,0x40,0x44,0x3D,0x00},
+    {0x00,0x7F,0x10,0x28,0x44},{0x00,0x41,0x7F,0x40,0x00},{0x7C,0x04,0x18,0x04,0x78},
+    {0x7C,0x08,0x04,0x04,0x78},{0x38,0x44,0x44,0x44,0x38},{0x7C,0x14,0x14,0x14,0x08},
+    {0x08,0x14,0x14,0x18,0x7C},{0x7C,0x08,0x04,0x04,0x08},{0x48,0x54,0x54,0x54,0x20},
+    {0x04,0x3F,0x44,0x40,0x20},{0x3C,0x40,0x40,0x20,0x7C},{0x1C,0x20,0x40,0x20,0x1C},
+    {0x3C,0x40,0x30,0x40,0x3C},{0x44,0x28,0x10,0x28,0x44},{0x0C,0x50,0x50,0x50,0x3C},
+    {0x44,0x64,0x54,0x4C,0x44},{0x00,0x08,0x36,0x41,0x00},{0x00,0x00,0x7F,0x00,0x00},
+    {0x00,0x41,0x36,0x08,0x00},{0x08,0x04,0x08,0x10,0x08},{0x00,0x00,0x00,0x00,0x00},
+};
+
+class FrekvensComponent : public Component, public uart::UARTDevice {
+public:
+    FrekvensComponent(uart::UARTComponent* uart_parent, uint8_t numPanels)
+        : UARTDevice(uart_parent), _numPanels(numPanels) {
+        memset(_canvas, 0, sizeof(_canvas));
+    }
+
+    void setup() override {
+        ESP_LOGI("frekvens", "Starting with %d panel(s)", _numPanels);
+        _clear();
+    }
+
+    void loop() override {
+        if (!_on) return;
+        uint32_t now = millis();
+
+        if (_scrollText[0] && now - _lastScroll >= _scrollMs) {
+            _lastScroll = now;
+            _scrollTick();
+            _sendFrame();
+        }
+    }
+
+    // --- Public API (called from YAML services) ---
+
+    void displayText(const char* text, uint8_t brightness, uint16_t scrollMs) {
+        _on         = true;
+        _brightness = brightness;            // 0-255 global brightness (OE PWM)
+        _scrollMs   = scrollMs;
+        strncpy(_scrollText, text, sizeof(_scrollText) - 1);
+        _scrollPos  = FRK_W;
+        _sendBrightness(_brightness);
+    }
+
+    void clear() {
+        memset(_canvas, 0, sizeof(_canvas));
+        _scrollText[0] = 0;
+        for (uint8_t p = 0; p < _numPanels; p++) _sendPanelFrame(p);
+        _sendShow();
+    }
+
+    void setOn(bool on) {
+        _on = on;
+        if (!on) clear();
+    }
+
+    void setBrightness(float b) {
+        _brightness = (uint8_t)(b * 255.0f);   // global brightness via /OE PWM
+        _sendBrightness(_brightness);
+    }
+
+private:
+    uint8_t  _numPanels;
+    bool     _on         = true;
+    uint8_t  _brightness = 255;
+
+    // Canvas: 16 × (numPanels×16) pixels, 8-bit each (1 byte/pixel)
+    uint8_t  _canvas[4 * 16 * 16] = {};  // max 4 panels
+
+    char     _scrollText[256] = {};
+    int      _scrollPos       = 0;
+    uint16_t _scrollMs        = 80;
+    uint32_t _lastScroll      = 0;
+
+    // --- Canvas helpers (8-bit, 1 byte/pixel) ---
+    void _setPixel(int x, int y, uint8_t v) {
+        if (x < 0 || x >= FRK_W || y < 0 || y >= _numPanels * FRK_H) return;
+        _canvas[y * FRK_W + x] = v;
+    }
+
+    void _clearCanvas() { memset(_canvas, 0, sizeof(_canvas)); }
+
+    void _drawChar(int x, int y, char c, uint8_t v) {
+        if ((uint8_t)c < 32 || (uint8_t)c > 127) c = '?';
+        const uint8_t* g = FRK_FONT[(uint8_t)c - 32];
+        for (int col = 0; col < 5; col++)
+            for (int row = 0; row < 7; row++)
+                if (g[col] & (1 << row)) _setPixel(x + col, y + row, v);
+    }
+
+    void _scrollTick() {
+        _clearCanvas();
+        int cy = (_numPanels * FRK_H - 7) / 2;
+        int cx = _scrollPos;
+        // Draw text at full intensity; global brightness is the /OE PWM.
+        for (const char* p = _scrollText; *p; p++, cx += 6)
+            _drawChar(cx, cy, *p, 255);
+        _scrollPos--;
+        if (_scrollPos < -(int)(strlen(_scrollText) * 6)) _scrollPos = FRK_W;
+    }
+
+    // --- Protocol ---
+
+    static uint8_t _crc8(const uint8_t* data, uint16_t len) {   // 256 must fit
+        uint8_t crc = 0x00;
+        while (len--) {
+            uint8_t b = *data++;
+            for (uint8_t i = 0; i < 8; i++) {
+                if ((crc ^ b) & 0x80) crc = (crc << 1) ^ 0x31;
+                else                   crc = (crc << 1);
+                b <<= 1;
+            }
+        }
+        return crc;
+    }
+
+    void _buildBitPlanes(uint8_t panelIdx, uint8_t* out) {
+        memset(out, 0, FRK_FRAME_B);
+        int rowBase = panelIdx * FRK_H;
+        for (int y = 0; y < FRK_H; y++) {
+            for (int x = 0; x < FRK_W; x++) {
+                uint8_t v = _canvas[(rowBase + y) * FRK_W + x];   // 8-bit pixel
+                if (!v) continue;
+                int xa = x, ya = y;
+                if (xa > 7) { ya += 16; xa -= 8; }
+                int addr  = xa + ya * 8;
+                int byteI = addr / 8, bitI = addr % 8;
+                for (int p = 0; p < FRK_PLANES; p++)
+                    if (v & (1 << p))
+                        out[p * FRK_PLANE_B + byteI] |= (1 << bitI);
+            }
+        }
+    }
+
+    void _sendPanelFrame(uint8_t panelIdx) {
+        uint8_t frame[FRK_FRAME_B];
+        _buildBitPlanes(panelIdx, frame);
+        uint8_t crc = _crc8(frame, FRK_FRAME_B);
+        write_byte(FRK_MAGIC_0); write_byte(FRK_MAGIC_1); write_byte(FRK_FRAME);
+        for (int i = 0; i < FRK_FRAME_B; i++) write_byte(frame[i]);
+        write_byte(crc);
+    }
+
+    void _sendShow() {
+        write_byte(FRK_MAGIC_0); write_byte(FRK_MAGIC_1); write_byte(FRK_SHOW);
+        flush();
+    }
+
+    void _sendBrightness(uint8_t b) {
+        write_byte(FRK_MAGIC_0); write_byte(FRK_MAGIC_1); write_byte(FRK_BRIGHT);
+        write_byte(b); flush();
+    }
+
+    void _sendFrame() {
+        for (uint8_t p = 0; p < _numPanels; p++) _sendPanelFrame(p);
+        _sendShow();
+    }
+
+    void _clear() {
+        write_byte(FRK_MAGIC_0); write_byte(FRK_MAGIC_1); write_byte(FRK_CLEAR);
+        flush();
+    }
+};
+
+// ESPHome LightOutput wrapper
+class FrekvensLight : public Component, public light::LightOutput {
+public:
+    explicit FrekvensLight(FrekvensComponent* panel) : _panel(panel) {}
+
+    light::LightTraits get_traits() override {
+        auto traits = light::LightTraits();
+        traits.set_supports_brightness(true);
+        traits.set_supports_color_temperature(false);
+        traits.set_supports_rgb(false);
+        return traits;
+    }
+
+    void write_state(light::LightState* state) override {
+        float brightness = 0;
+        state->current_values.as_brightness(&brightness);
+        bool on = state->current_values.is_on();
+        _panel->setOn(on);
+        if (on) _panel->setBrightness(brightness);
+    }
+
+private:
+    FrekvensComponent* _panel;
+};
