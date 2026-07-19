@@ -50,6 +50,9 @@
 .bigbtn.dodge { animation: flick 0.3s infinite; }
 .cockpit.fx-good { box-shadow: 0 0 0 2px #27b537; }
 .cockpit.fx-bad  { box-shadow: 0 0 0 2px var(--accent); }
+@keyframes bash-shake { 0%,100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+.bashing { animation: bash-shake 0.25s infinite; }
 .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
 .stats-grid .srow { display: flex; justify-content: space-between;
   border-bottom: 1px dashed var(--border); padding: 3px 0; font-size: 12px; }
@@ -227,12 +230,23 @@
   <section class="panel">
     <h2>vanta &middot; <span id="fight-st">standby</span></h2>
     <div id="lobby-ui" hidden>
-      <h3>party size (shared decks below 4)</h3>
+      <h3>boss</h3>
+      <div class="boss-strip" id="fboss-strip">
+        <button class="segmented-btn active" data-b="V">vanta</button>
+        <button class="segmented-btn" data-b="M">moth</button>
+        <button class="segmented-btn" data-b="B">bulwark</button>
+      </div>
+      <h3>party size</h3>
       <div class="boss-strip" id="party-strip">
-        <button class="segmented-btn active" data-p="1">1 &middot; solo sim</button>
-        <button class="segmented-btn" data-p="2">2</button>
+        <button class="segmented-btn active" data-p="1">1 &middot; pilot</button>
+        <button class="segmented-btn" data-p="2">2 &middot; bundles</button>
         <button class="segmented-btn" data-p="3">3</button>
         <button class="segmented-btn" data-p="4">4</button>
+      </div>
+      <h3>sim level</h3>
+      <div class="rocker">
+        <button class="btn-secondary" id="diff-cycle" style="flex:1">D2 &middot; FIELD</button>
+        <span class="lane-tag" id="assist-chip" hidden>ASSISTED</span>
       </div>
     </div>
     <div class="rocker">
@@ -267,6 +281,8 @@
       <div class="hull-leds" id="hull-leds"></div>
       <span class="lane-tag" id="enrage-tag" hidden>enrage</span>
       <span class="lane-tag vuln" id="vuln-tag" hidden>VULN &mdash; FIRE!</span>
+      <span class="lane-tag vuln" id="visor-tag" hidden>VISOR OPEN &mdash; HEAVY!</span>
+      <span class="lane-tag" id="dust-tag" hidden>DUST &mdash; lanes hidden</span>
     </div>
     <div class="deck-alert" id="deck-alert" hidden></div>
     <button class="bigbtn wide dodge" id="dodge" hidden>DODGE!</button>
@@ -301,6 +317,7 @@
     <h3>overcharge (hold to arm)</h3>
     <button class="bigbtn wide pullbar" id="shl-over"><span class="fill" id="over-fill"></span>OVERCHARGE</button>
     <div class="cap-gauge"><div id="cap-fill"></div></div>
+    <div class="deck-alert" id="shl-cd-alert" hidden>SHIELD COOLING &mdash; you committed to a feint</div>
   </section>
 
   <!-- GUNNER — the artillery station -->
@@ -326,6 +343,7 @@
       <div id="fire-cover">swipe to arm</div>
       <button class="bigbtn wide" id="fire">FIRE</button>
     </div>
+    <button class="btn-secondary" id="fire-ping" hidden>FIRE PING &mdash; provoke</button>
   </section>
 
   <!-- HACKER — the terminal -->
@@ -386,24 +404,25 @@
     <div class="quadrants">
       <div id="alert-diamond"></div>
       <div class="quad" id="q-shl"><h4>&#128737; shield</h4>
-        <div class="mini-row"><button class="segmented-btn">&#9664;</button><button class="segmented-btn">&#9654;</button></div>
-        <div class="mini-row"><button class="segmented-btn">1</button><button class="segmented-btn">2</button><button class="segmented-btn active">3</button><button class="segmented-btn">4</button></div>
+        <div class="mini-row"><button class="segmented-btn p-key" data-k="L">&#9664;</button><button class="segmented-btn p-key" data-k="R">&#9654;</button><button class="segmented-btn p-key" data-k="O">OVR</button></div>
+        <div class="mini-row" id="p-dial"><button class="segmented-btn p-key" data-k="1">1</button><button class="segmented-btn p-key" data-k="2">2</button><button class="segmented-btn p-key" data-k="3">3</button><button class="segmented-btn p-key" data-k="4">4</button></div>
       </div>
       <div class="quad" id="q-gun"><h4>&#128299; guns</h4>
-        <div class="mini-row"><button class="segmented-btn">crank</button><button class="segmented-btn">FIRE</button></div>
-        <div class="aim-strip"><span class="lamp"></span><span class="lamp on"></span><span class="lamp"></span></div>
+        <div class="mini-row"><button class="segmented-btn" id="p-crank">CRANK (hold)</button><button class="segmented-btn" id="p-fire">FIRE</button></div>
+        <div class="mini-row"><button class="segmented-btn" id="p-ping" hidden>PING</button></div>
+        <div class="mini-glyph" id="p-crank-pct">0%</div>
       </div>
       <div class="quad" id="q-hck"><h4>&#128225; signal</h4>
         <div class="mini-glyph" id="mini-glyph">&#9671;&#9670;&#9651;</div>
         <div class="mini-row"><button class="segmented-btn">scan</button></div>
       </div>
       <div class="quad" id="q-med"><h4>&#128295; systems</h4>
-        <div class="mini-row"><button class="segmented-btn">forge</button><button class="segmented-btn">wipe</button></div>
+        <div class="mini-row"><button class="segmented-btn p-key" data-k="W" data-r="3">WIPE</button><button class="segmented-btn p-key" data-k="X" data-r="-1">DODGE</button></div>
       </div>
     </div>
-    <p class="hint">visual mockup &mdash; the condensed Pilot deck ships in M2. for a
-      solo fight (party 1), use the four role tabs directly: solo removes the
-      decode layer, so the boss blinks its frequency openly &mdash; read up, act down.</p>
+    <p class="hint">the solo cockpit: all four consoles condensed. solo removes the
+      decode layer &mdash; the boss blinks its frequency openly, so read up and dial
+      down. the diamond points at the quadrant the current telegraph concerns.</p>
   </section>
 </div>
 <script src="raid.js"></script>

@@ -426,9 +426,23 @@ WS ~10 KB/s. The cost is still **surface area**, not resources.
   are functional; 2–3p deck BUNDLES and the condensed Pilot deck are M2, so
   smaller parties share tabs. Difficulty is fixed at FIELD until the M2
   knob.)* *The game exists.*
-- **M2 — scaling + knob.** Solo Pilot deck + 2p/3p bundles, SIM LEVEL knob
-  (D1–D4), disconnect-pause, assist governor. MOTH + BULWARK (feints, dust,
-  ping/heavy forge fork, riposte, bash). *Roster depth begins.*
+- **M2 — scaling + knob** ✅ *(shipped: the engine is now data-driven per §10
+  — bosses are `FBossDef` const tables + shared anatomy programs. SIM LEVEL
+  knob D1–D4 with window/cadence/hull/enrage scalars and mechanic gating
+  (DRILL strips feints/afflictions and enrage; NIGHTMARE forges duds — M2
+  simplification: a flat 15% roll at send time, and D4's bash control-remap
+  stays cosmetic). MOTH: feints that dissolve at 60% and punish a committed
+  shield with a 3 s cooldown, the hacker pulse readout (REAL!/FAKE!), and
+  DUST that blanks the decks' lane alerts until wiped or shot clear.
+  BULWARK: armored 1-damage cap, the ping→riposte→visor-lift BAIT loop,
+  ping/heavy forge fork (2-node vs 4-node trace), BASH deck shudder, and
+  MOCKING fake lifts that never uncap. Deck bundles: 2p info/action, 3p
+  shield/hacker/action, and the functional solo Pilot cockpit with the
+  alert diamond driven by a device hint. Disconnect-pause via per-role
+  heartbeats — a claimed deck silent >10 s puts the boss visibly to sleep;
+  the client remembers its bundle in localStorage. Assist governor: two
+  consecutive wipes at D1–D2 grant +2 hull and −10% cadence, announced as
+  ASSISTED on the nameplate.)* *Roster depth begins.*
 - **M3 — the evening.** CHORUS (triple anatomy, rounds, targeting),
   mutations, gauntlet structure + mod drafts, persistence. *Replayable.*
 - **M4 — the finale + juice.** NULL (all four corruptions, dialect theft,
