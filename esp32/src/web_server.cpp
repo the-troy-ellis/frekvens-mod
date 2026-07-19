@@ -682,6 +682,10 @@ void WebUI::broadcastFrame(const uint8_t* pixelData, uint8_t w, uint8_t h) {
     ws.binaryAll(lastFrame, lastFrameLen);
 }
 
+void WebUI::broadcastText(const char* json, size_t len) {
+    if (ws.count()) ws.textAll(json, len);
+}
+
 void WebUI::broadcastZones(const AppConfig& cfg) {
     StaticJsonDocument<512> doc;
     doc["type"] = "zones";

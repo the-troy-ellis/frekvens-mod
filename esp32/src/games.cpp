@@ -811,6 +811,9 @@ struct GameDef {
     void (*init)(Renderer&);
     void (*input)(uint8_t, char, bool);
     bool (*tick)(Renderer&, uint32_t);
+    // Optional device→deck snapshot publisher (see gameNetSnapshot in games.h).
+    // Omitted from a row = value-initialized to nullptr = no net layer.
+    size_t (*net)(char*, size_t);
 };
 
 static const GameDef GAMES[] = {
@@ -819,7 +822,7 @@ static const GameDef GAMES[] = {
     { { "tetris", "Tetris",   1 }, tetrisInit, tetrisInput, tetrisTick },
     { { "dino",   "Pip Run",  1 }, dinoInit,   dinoInput,   dinoTick   },
     { { "flappy", "Flappy Pip", 1 }, flappyInit, flappyInput, flappyTick },
-    { { "raid",   "Raid 16",   4 }, raidInit,   raidInput,   raidTick   },
+    { { "raid",   "Raid 16",   4 }, raidInit,   raidInput,   raidTick,  raidNet },
 };
 static const uint8_t NGAMES = sizeof(GAMES) / sizeof(GAMES[0]);
 static int8_t curGame = -1;
@@ -844,4 +847,8 @@ void gameInput(uint8_t player, char key, bool pressed) {
 
 bool gameTick(Renderer& r, uint32_t nowMs) {
     return curGame >= 0 && GAMES[curGame].tick(r, nowMs);
+}
+
+size_t gameNetSnapshot(char* buf, size_t cap) {
+    return (curGame >= 0 && GAMES[curGame].net) ? GAMES[curGame].net(buf, cap) : 0;
 }

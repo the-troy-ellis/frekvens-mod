@@ -414,9 +414,18 @@ WS ~10 KB/s. The cost is still **surface area**, not resources.
 - **M0 — walking skeleton** ✅ *(shipped as the concept demo: parametric
   face + 10 telegraph/personality animations on hardware, deck mockups on
   raid.html, WS-driven)*
-- **M1 — one real fight.** Telegraph engine (deck-draw + windows + hull +
-  vuln windows), VANTA complete with moods, 4p decks functional, lobby,
-  win/lose/stats. *The game exists.*
+- **M1 — one real fight** ✅ *(shipped: weighted deck-draw telegraph engine
+  with pity rules — no telegraph 3× running, a beam guaranteed every 45 s;
+  VANTA's three phases with taunt interstitials, moods (COLD/CURIOUS/STERN
+  skew the deck and the windows), response windows / hull / vulnerability
+  windows, acid + jam with medic wipe/re-sync, P3 lane fire with per-deck
+  dodge and the 90 s enrage, the shell forge→send→fire pipeline and hacker
+  glyph decode at 2p+ (solo keeps the §4 decode-free sim rules), lobby with
+  party size, win/lose + stats debrief. Decks render from a ~10 Hz
+  idempotent JSON snapshot (`raidNet` → WS). M1 notes: the four role tabs
+  are functional; 2–3p deck BUNDLES and the condensed Pilot deck are M2, so
+  smaller parties share tabs. Difficulty is fixed at FIELD until the M2
+  knob.)* *The game exists.*
 - **M2 — scaling + knob.** Solo Pilot deck + 2p/3p bundles, SIM LEVEL knob
   (D1–D4), disconnect-pause, assist governor. MOTH + BULWARK (feints, dust,
   ping/heavy forge fork, riposte, bash). *Roster depth begins.*

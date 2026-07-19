@@ -157,6 +157,10 @@ public:
 
     void broadcastState(const DisplayState& state);
     void broadcastFrame(const uint8_t* pixelData, uint8_t w, uint8_t h);
+    // Push an app-defined JSON message to every WS client (e.g. Raid 16's
+    // ~10 Hz deck snapshots). Not cached for late joiners — callers send
+    // periodic idempotent updates, so the next tick re-syncs a fresh client.
+    void broadcastText(const char* json, size_t len);
     // Zone-mode on/off + every zone's current assignment — cached and sent to
     // newly connected clients, same pattern as broadcastState/lastStateJson.
     void broadcastZones(const AppConfig& cfg);

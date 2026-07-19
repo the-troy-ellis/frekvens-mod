@@ -34,6 +34,7 @@ static unsigned long lastWsService = 0;
 static unsigned long lastScroll    = 0;
 static unsigned long lastAnimFrame = 0;
 static unsigned long lastBrightSend = 0;
+static unsigned long lastGameNet   = 0;
 static int           sentBrightness = -1;   // -1 = never sent → forces first send
 
 // Set whenever the canvas content changes (mode change, scroll tick, anim frame,
@@ -594,6 +595,15 @@ void loop() {
         sentBrightness = dispState.brightness;
         lastBrightSend = now;
         chain->setBrightness(dispState.brightness);
+    }
+
+    // Networked games (Raid 16) publish ~10 Hz idempotent deck-state snapshots
+    // over the WS. Only whole-canvas games — a zone-hosted game has no deck UI.
+    if (!cfg.zoneModeOn && dispState.cmd == DisplayCmd::Game && now - lastGameNet >= 100) {
+        lastGameNet = now;
+        static char netBuf[512];   // static: keeps the loop-task stack small
+        size_t n = gameNetSnapshot(netBuf, sizeof(netBuf));
+        if (n) webUI.broadcastText(netBuf, n);
     }
 
     // Reap dead/stuck WebSocket clients (they otherwise pin their queued frames

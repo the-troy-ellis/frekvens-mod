@@ -37,6 +37,23 @@
 .lane-tag { margin-left: auto; font-size: 10px; letter-spacing: 0.12em;
   text-transform: uppercase; color: var(--text-dim);
   border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; }
+.lane-tag.vuln { color: var(--ink); background: var(--accent);
+  border-color: var(--accent2); animation: flick 0.4s infinite; }
+.hp-bar { height: 7px; border-radius: 4px; background: var(--surface);
+  border: 1px solid var(--border); overflow: hidden; }
+#hp-fill { height: 100%; width: 100%; background: var(--accent);
+  transition: width 0.15s linear; }
+.deck-alert { text-align: center; font-size: 11px; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink);
+  background: var(--accent); border-radius: 6px; padding: 8px;
+  animation: flick 0.5s infinite; }
+.bigbtn.dodge { animation: flick 0.3s infinite; }
+.cockpit.fx-good { box-shadow: 0 0 0 2px #27b537; }
+.cockpit.fx-bad  { box-shadow: 0 0 0 2px var(--accent); }
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
+.stats-grid .srow { display: flex; justify-content: space-between;
+  border-bottom: 1px dashed var(--border); padding: 3px 0; font-size: 12px; }
+.stats-grid .srow b { color: var(--accent2); }
 
 /* deck tabs + panes */
 .deck-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -194,11 +211,11 @@
     <span id="raid-conn" class="chip offline">&hellip;</span>
   </header>
 
-  <p class="raid-banner">deck review build &mdash; controls are tactile mockups &middot;
-     boss + animation strips drive the real panel</p>
+  <p class="raid-banner" id="raid-banner">boss + animation strips drive the real panel &middot;
+     enter the lobby to fight</p>
 
-  <!-- boss + animation selection (REAL: drives the display) -->
-  <section class="panel">
+  <!-- boss + animation selection (REAL: drives the display; showcase only) -->
+  <section class="panel" id="showcase-card">
     <h2>boss &mdash; on the panel</h2>
     <div class="boss-strip" id="boss-strip"></div>
     <h3>animations</h3>
@@ -206,30 +223,53 @@
     <p class="hint">auto-tours the boss's set every ~6s until you pick. look up.</p>
   </section>
 
-  <!-- M1 slice: a real, winnable VANTA fight (solo-sim rules) -->
+  <!-- M1: the VANTA fight — lobby / fight flow -->
   <section class="panel">
-    <h2>fight &mdash; vanta &middot; solo sim</h2>
+    <h2>vanta &middot; <span id="fight-st">standby</span></h2>
+    <div id="lobby-ui" hidden>
+      <h3>party size (shared decks below 4)</h3>
+      <div class="boss-strip" id="party-strip">
+        <button class="segmented-btn active" data-p="1">1 &middot; solo sim</button>
+        <button class="segmented-btn" data-p="2">2</button>
+        <button class="segmented-btn" data-p="3">3</button>
+        <button class="segmented-btn" data-p="4">4</button>
+      </div>
+    </div>
     <div class="rocker">
-      <button class="btn-primary" id="fight-start" style="flex:1;padding:14px">START FIGHT</button>
-      <button class="btn-secondary" id="fight-stop" style="flex:0 0 90px">stop</button>
+      <button class="btn-primary" id="fight-start" style="flex:1;padding:14px">ENTER LOBBY</button>
+      <button class="btn-secondary" id="fight-stop" style="flex:0 0 90px" hidden>back</button>
     </div>
     <p class="hint" id="fight-hint">read the panel: eyes slam a side &rarr; rocker that side.
       eye-blinks in loops of N &rarr; dial N. mouth opening &rarr; hold OVERCHARGE (or interrupt
-      with a full-crank shot). a clean dial-block opens its mouth &mdash; crank to 100% and FIRE
-      for big damage. top stage row = boss hp &middot; segments below = your hull.</p>
+      with a charged shot). a clean dial-block opens its mouth &mdash; that window is the win
+      condition. at 2p+ the hacker decodes the blink glyph and the medic forges the shells.</p>
+  </section>
+
+  <!-- stats (win / lose) -->
+  <section class="panel" id="stats-card" hidden>
+    <h2 id="stats-res">victory</h2>
+    <div class="stats-grid" id="stats-grid"></div>
+    <div class="rocker">
+      <button class="btn-primary" id="stats-rematch" style="flex:1;padding:14px">REMATCH</button>
+      <button class="btn-secondary" id="stats-exit" style="flex:0 0 90px">lobby</button>
+    </div>
   </section>
 
   <!-- cockpit header (shared deck frame) -->
-  <div class="cockpit">
+  <div class="cockpit" id="cockpit">
     <div class="nameplate">
       <span class="np-name" id="np-name">VANTA</span>
-      <span class="np-epithet" id="np-epithet">the signal titan &middot; mood: cold</span>
+      <span class="np-epithet" id="np-epithet">the signal titan</span>
     </div>
+    <div class="hp-bar"><div id="hp-fill"></div></div>
     <div class="cockpit-row">
-      <div class="phase-pips"><span class="pip on"></span><span class="pip"></span><span class="pip"></span></div>
+      <div class="phase-pips" id="phase-pips"><span class="pip on"></span><span class="pip"></span><span class="pip"></span></div>
       <div class="hull-leds" id="hull-leds"></div>
-      <span class="lane-tag">lane 2</span>
+      <span class="lane-tag" id="enrage-tag" hidden>enrage</span>
+      <span class="lane-tag vuln" id="vuln-tag" hidden>VULN &mdash; FIRE!</span>
     </div>
+    <div class="deck-alert" id="deck-alert" hidden></div>
+    <button class="bigbtn wide dodge" id="dodge" hidden>DODGE!</button>
   </div>
 
   <!-- deck tabs -->
@@ -270,10 +310,11 @@
     <div class="crank-wrap"><div id="crank"><span>crank<br>0%</span></div></div>
     <h3>breach</h3>
     <div class="breach-tray">
-      <div><div class="shell ping" id="shell-ping"></div><div class="shell-lbl">ping</div></div>
-      <div><div class="shell heavy" id="shell-heavy"></div><div class="shell-lbl">heavy</div></div>
+      <div><div class="shell ping" id="shell-ping"></div><div class="shell-lbl">slot 1</div></div>
+      <div><div class="shell heavy" id="shell-heavy"></div><div class="shell-lbl">slot 2</div></div>
       <button class="btn-secondary" id="mock-load">mock: load</button>
     </div>
+    <p class="hint" id="breach-hint" hidden>2p+: shells come from the medic's forge &mdash; no shell, no shot.</p>
     <h3>aim</h3>
     <div class="seesaw" id="aim-seesaw">
       <button class="bigbtn" id="gun-l">&#9664;</button>
@@ -316,13 +357,20 @@
       <div class="tri-icon" id="tri-hck"><div class="dot"></div>hck</div>
       <div class="tri-icon" id="tri-med"><div class="dot"></div>med</div>
     </div>
-    <h3>shell forge (trace 1&rarr;4 &middot; 1&rarr;2 = ping)</h3>
+    <h3>shell forge (trace 1&rarr;4, then send)</h3>
     <div class="forge">
       <button class="node" data-n="1">1</button><button class="node" data-n="2">2</button>
       <button class="node" data-n="3">3</button><button class="node" data-n="4">4</button>
     </div>
     <div class="tube-rig"><div id="capsule"></div>
       <button class="btn-primary" id="send-shell" disabled>send to gunner</button></div>
+    <div id="resync-rig" hidden>
+      <h3>re-sync pad (key is on the hacker's screen)</h3>
+      <div class="forge">
+        <button class="node rsy" data-r="0">1</button><button class="node rsy" data-r="1">2</button>
+        <button class="node rsy" data-r="2">3</button><button class="node rsy" data-r="3">4</button>
+      </div>
+    </div>
     <h3>wipe kit</h3>
     <div class="wipe-pad" id="wipe-pad"></div>
     <h3>hull repair (hold)</h3>
@@ -353,8 +401,9 @@
         <div class="mini-row"><button class="segmented-btn">forge</button><button class="segmented-btn">wipe</button></div>
       </div>
     </div>
-    <p class="hint">solo removes the decode layer: the boss blinks its frequency
-      openly &mdash; read up, act down. the diamond points at what needs you.</p>
+    <p class="hint">visual mockup &mdash; the condensed Pilot deck ships in M2. for a
+      solo fight (party 1), use the four role tabs directly: solo removes the
+      decode layer, so the boss blinks its frequency openly &mdash; read up, act down.</p>
   </section>
 </div>
 <script src="raid.js"></script>

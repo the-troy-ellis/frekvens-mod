@@ -1,30 +1,46 @@
-/* Raid 16 — deck review build (docs/raid16.md v0.2).
-   The boss + animation strips are REAL (they drive the physical panel over
-   WS). The five decks are tactile visual mockups for review: every control
-   gives press/drag feedback locally, but nothing is wired to game logic —
-   there is no game engine yet (that's M1). */
+/* Raid 16 — M1 deck client (docs/raid16.md v0.2 §11).
+   The device is authoritative: decks send single-char keys over the game
+   input path and render themselves from the ~10 Hz {"type":"raid"} snapshot
+   the device broadcasts. Each deck shows only what its role should see —
+   phones never mirror the telegraphs (§0.4); reading the panel is the game.
+   Outside the fight flow, the boss/animation strips drive the M0.5 showcase
+   on the real panel and the deck controls fall back to tactile mockups. */
 
 let ws = null;
 
-/* ---------------- boss + animation strips (REAL) ---------------- */
+/* ---------------- boss + animation strips (showcase) ---------------- */
 const BOSSES = {
-  V: { name: 'VANTA',   epithet: 'the signal titan · mood: cold',
+  V: { name: 'VANTA',   epithet: 'the signal titan',
        anims: [[0,'idle'],[1,'sweep ←'],[2,'sweep →'],[3,'beam f3'],[4,'charge'],
                [5,'acid'],[6,'jam'],[7,'enrage'],[8,'bullet hell'],[9,'melt']] },
-  M: { name: 'MOTH',    epithet: 'the feintweaver · mood: skittish',
+  M: { name: 'MOTH',    epithet: 'the feintweaver',
        anims: [[0,'idle'],[1,'FEINT'],[2,'real sweep'],[3,'dust'],[4,'flurry'],
                [5,'frenzy'],[9,'death']] },
-  C: { name: 'THE CHORUS', epithet: 'three-as-one · mood: round',
+  C: { name: 'THE CHORUS', epithet: 'three-as-one',
        anims: [[0,'idle'],[1,'round'],[2,'lead change'],[3,'head down'],
                [4,'unison grin'],[9,'death']] },
-  B: { name: 'BULWARK', epithet: 'the sealed door · mood: patient',
+  B: { name: 'BULWARK', epithet: 'the sealed door',
        anims: [[0,'idle'],[1,'riposte'],[2,'visor lift'],[3,'bash'],
                [4,'fake lift'],[9,'death']] },
-  N: { name: 'NULL',    epithet: 'the static king · no mood — it samples',
+  N: { name: 'NULL',    epithet: 'the static king',
        anims: [[0,'idle'],[1,'cohere+beam'],[2,'possession'],[3,'inversion'],
                [4,'false wipe'],[9,'death']] },
 };
 let curBoss = 'V';
+
+/* ---------------- device state ---------------- */
+const $ = (id) => document.getElementById(id);
+const GLYPHS = ['◇', '◆', '▲', '▽'];   // ◇ ◆ ▲ ▽
+const ROLE_KEYS = ['shl', 'gun', 'hck', 'med'];
+const ROLE_NAMES = ['shield', 'gunner', 'hacker', 'medic'];
+
+let snap = null;              // latest device snapshot (null = idle/showcase)
+let lastSnapAt = 0;           // snapshots stop in idle — decay the UI after 1.2s
+let lastEv = -1;
+let myRole = 0;               // 0 shl / 1 gun / 2 hck / 3 med — follows the open tab
+
+const st = () => (snap ? snap.st : 'idle');
+const inFight = () => st() === 'fight';
 
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -34,18 +50,28 @@ function connectWS() {
     setConn(true);
     send({ cmd: 'game', name: 'raid' });
   };
+  ws.onmessage = (e) => {
+    if (typeof e.data !== 'string') return;      // frame previews — not this page's job
+    let m; try { m = JSON.parse(e.data); } catch { return; }
+    if (m.type === 'raid') { lastSnapAt = Date.now(); handleSnap(m); }
+  };
   ws.onclose = () => { setConn(false); setTimeout(connectWS, 2000); };
 }
 function send(o) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(o)); }
-function key(k) { send({ cmd: 'input', p: 0, k: String(k), s: 1 }); }
+function key(k) { send({ cmd: 'input', p: myRole, k: String(k), s: 1 }); }
 function setConn(on) {
-  const el = document.getElementById('raid-conn');
+  const el = $('raid-conn');
   el.textContent = on ? 'online' : 'offline';
   el.className = `chip ${on ? 'online' : 'offline'}`;
 }
 
+/* the device goes silent in showcase mode — treat a stale snapshot as idle */
+setInterval(() => {
+  if (snap && Date.now() - lastSnapAt > 1200) { snap = null; renderFlow(); }
+}, 400);
+
 function buildBossStrip() {
-  const strip = document.getElementById('boss-strip');
+  const strip = $('boss-strip');
   strip.innerHTML = '';
   for (const [k, b] of Object.entries(BOSSES)) {
     const btn = document.createElement('button');
@@ -56,7 +82,7 @@ function buildBossStrip() {
   }
 }
 function buildAnimGrid() {
-  const grid = document.getElementById('anim-grid');
+  const grid = $('anim-grid');
   grid.innerHTML = '';
   BOSSES[curBoss].anims.forEach(([d, label], i) => {
     const btn = document.createElement('button');
@@ -75,44 +101,155 @@ function selectBoss(k) {
   curBoss = k;
   key(k);                                   // V/M/C/B/N selects on the device
   buildBossStrip(); buildAnimGrid();
-  document.getElementById('np-name').textContent = BOSSES[k].name;
-  document.getElementById('np-epithet').textContent = BOSSES[k].epithet;
+  if (st() === 'idle') {
+    $('np-name').textContent = BOSSES[k].name;
+    $('np-epithet').textContent = BOSSES[k].epithet;
+  }
 }
 
-/* ---------------- fight mode (M1 slice — VANTA, solo-sim) ----------------
-   When ON, the Shield rocker/knob/overcharge and Gunner crank/fire send real
-   fight keys (L/R, 1-4, O, K, F). The device runs the whole fight; the panel
-   is the display. When OFF, those same controls are inert mockups again. */
-let fightOn = false;
-document.getElementById('fight-start').onclick = () => {
-  fightOn = true;
-  key('G');
-  crankPct = 0; crankSent = 0; bumpCrank(0);    // fresh flywheel each fight
-  document.getElementById('fight-hint').style.color = 'var(--accent2)';
-};
-document.getElementById('fight-stop').onclick = () => {
-  fightOn = false;
-  key('Q');
-  document.getElementById('fight-hint').style.color = '';
-};
+/* ---------------- fight flow card (lobby / start / abandon) ---------------- */
+$('fight-start').onclick = () => key('G');   // idle→lobby, lobby→fight, stats→rematch
+$('fight-stop').onclick  = () => key('Q');
+$('stats-rematch').onclick = () => key('G');
+$('stats-exit').onclick    = () => key('Q');
+document.querySelectorAll('#party-strip .segmented-btn').forEach(b =>
+  b.onpointerdown = (e) => { e.preventDefault(); if (st() === 'lobby') key(b.dataset.p); });
+
+const ST_LABEL = { idle: 'standby', lobby: 'lobby', intro: 'incoming…',
+                   fight: 'FIGHT', win: 'victory', lose: 'wiped', stats: 'debrief' };
+
+/* Everything state-shaped: called on every snapshot AND on decay-to-idle. */
+function renderFlow() {
+  const s = st();
+  $('fight-st').textContent = ST_LABEL[s] || s;
+  // Hidden from the lobby on: the anim strip's digit keys are party-size /
+  // freq-dial keys inside the fight flow, and the panel is no longer showcasing.
+  $('showcase-card').style.display = s === 'idle' ? '' : 'none';
+  $('lobby-ui').hidden = s !== 'lobby';
+  $('fight-start').hidden = !(s === 'idle' || s === 'lobby');
+  $('fight-start').textContent = s === 'idle' ? 'ENTER LOBBY' : 'START FIGHT';
+  $('fight-stop').hidden = s === 'idle';
+  $('fight-stop').textContent = s === 'lobby' ? 'back' : 'abandon';
+
+  const statsUp = (s === 'win' || s === 'lose' || s === 'stats') && snap && snap.stats;
+  $('stats-card').hidden = !statsUp;
+  if (statsUp) renderStats(snap.stats);
+
+  if (s === 'idle') {
+    $('np-name').textContent = BOSSES[curBoss].name;
+    $('np-epithet').textContent = BOSSES[curBoss].epithet;
+    $('hp-fill').style.width = '100%';
+    $('enrage-tag').hidden = true; $('vuln-tag').hidden = true;
+    $('deck-alert').hidden = true; $('dodge').hidden = true;
+    $('resync-rig').hidden = true; $('breach-hint').hidden = true;
+    $('mock-load').hidden = false;
+    paintHull(10); paintPhase(1);
+  }
+}
+
+function renderStats(t) {
+  $('stats-res').textContent = t.res === 'win' ? 'victory — the titan melts' : 'wiped — it grins';
+  const rows = [
+    ['fight length', t.sec + 's'], ['hull lost', t.hullLost],
+    ['clean blocks', t.blk], ['misses', t.miss],
+    ['damage dealt', t.dmg], ['window damage', t.vdmg],
+    ['shots fired', t.shots], ['charge interrupts', t.itr],
+    ['acid wiped', t.wip], ['jams re-synced', t.fix],
+  ];
+  $('stats-grid').innerHTML = rows.map(([k, v]) =>
+    `<div class="srow"><span>${k}</span><b>${v}</b></div>`).join('');
+}
 
 /* ---------------- cockpit header ---------------- */
 (function hullLeds() {
-  const wrap = document.getElementById('hull-leds');
-  for (let i = 0; i < 10; i++) {
-    const d = document.createElement('span');
-    d.className = 'hled' + (i >= 8 ? ' off' : '');   // mock: 8/10 hull
-    wrap.appendChild(d);
-  }
+  const wrap = $('hull-leds');
+  for (let i = 0; i < 10; i++) wrap.appendChild(document.createElement('span'));
+  paintHull(10);
 })();
+function paintHull(h) {
+  [...$('hull-leds').children].forEach((d, i) => d.className = 'hled' + (i < h ? '' : ' off'));
+}
+function paintPhase(ph) {
+  [...$('phase-pips').children].forEach((p, i) => p.className = 'pip' + (i < ph ? ' on' : ''));
+}
+$('dodge').onpointerdown = (e) => { e.preventDefault(); key('X'); };
 
-/* ---------------- deck tabs ---------------- */
+function cockpitFx(evn) {
+  const good = ['block', 'vuln', 'vulnhit', 'interrupt', 'dodge', 'wiped', 'resync', 'win'];
+  const bad  = ['bosshit', 'lanehit', 'rsyfail', 'wipe', 'acid', 'jam'];
+  const cls = good.includes(evn) ? 'fx-good' : bad.includes(evn) ? 'fx-bad' : null;
+  if (!cls) return;
+  const c = $('cockpit');
+  c.classList.remove('fx-good', 'fx-bad'); void c.offsetWidth;
+  c.classList.add(cls);
+  setTimeout(() => c.classList.remove(cls), 350);
+}
+
+/* ---------------- snapshot → UI ---------------- */
+function handleSnap(s) {
+  snap = s;
+  renderFlow();
+
+  const fightish = s.st === 'intro' || s.st === 'fight';
+  if (fightish || s.st === 'win' || s.st === 'lose' || s.st === 'stats') {
+    $('np-name').textContent = 'VANTA';
+    $('np-epithet').textContent = `the signal titan · mood: ${s.mood.toLowerCase()} · P${s.ph}`;
+  }
+  $('hp-fill').style.width = Math.max(0, Math.min(100, s.hp)) + '%';
+  paintHull(s.hull); paintPhase(s.ph);
+
+  $('enrage-tag').hidden = !(s.enrage >= 0 && fightish);
+  $('enrage-tag').textContent = `enrage ${s.enrage}s`;
+  $('vuln-tag').hidden = !(s.vulnMs > 0);
+
+  /* party strip highlight */
+  document.querySelectorAll('#party-strip .segmented-btn').forEach(b =>
+    b.classList.toggle('active', +b.dataset.p === s.party));
+
+  /* my deck's alerts (acid/jam target roles 0-3) */
+  const alerts = [];
+  if (s.acid === myRole) alerts.push('ACID ON YOUR DECK — shout for the medic!');
+  if (s.jam  === myRole) alerts.push('JAMMED — medic re-sync!');
+  $('deck-alert').hidden = alerts.length === 0;
+  $('deck-alert').textContent = alerts.join(' ');
+
+  /* P3 lane fire aimed at me */
+  $('dodge').hidden = s.lane !== myRole;
+
+  /* gunner: breach + crank reconcile (the device is the truth) */
+  $('shell-ping').classList.toggle('loaded', s.party >= 2 ? s.shells >= 1 : crankPct >= 100);
+  $('shell-heavy').classList.toggle('loaded', s.party >= 2 && s.shells >= 2);
+  $('mock-load').hidden = s.st !== 'idle';
+  $('breach-hint').hidden = !(fightish && s.party >= 2);
+  if (!crankDragging && inFight()) {
+    crankPct = s.crank; crankSent = Math.floor(s.crank / 10);
+    paintCrank();
+  }
+
+  /* hacker: live glyph + codebook + resync relay */
+  paintHackerCrt(s);
+  paintCodebook(s.code);
+
+  /* medic: triage + resync pad + wipe slimes */
+  ROLE_KEYS.forEach((r, i) =>
+    $('tri-' + r).classList.toggle('alert', s.acid === i || s.jam === i));
+  $('resync-rig').hidden = !(s.jam >= 0 && inFight());
+  syncSlimes(s);
+
+  /* one-shot event feedback */
+  if (s.ev !== lastEv) { lastEv = s.ev; cockpitFx(s.evn); }
+}
+
+/* ---------------- deck tabs (the open tab IS my role) ---------------- */
 document.querySelectorAll('#deck-tabs .tab').forEach(t => {
   t.onclick = () => {
     document.querySelectorAll('#deck-tabs .tab').forEach(x => x.classList.remove('active'));
     document.querySelectorAll('.deck').forEach(d => d.classList.remove('active'));
     t.classList.add('active');
-    document.getElementById('deck-' + t.dataset.d).classList.add('active');
+    $('deck-' + t.dataset.d).classList.add('active');
+    const r = ROLE_KEYS.indexOf(t.dataset.d);
+    myRole = r >= 0 ? r : 0;                  // pilot mockup counts as shield
+    if (snap) handleSnap(snap);               // re-filter alerts for the new role
   };
 });
 
@@ -124,21 +261,21 @@ function holdFx(el, onDown, onUp) {
 }
 
 /* ============ SHIELD — breaker panel ============ */
-const seesaw = document.getElementById('seesaw');
-const shlL = document.getElementById('shl-l'), shlR = document.getElementById('shl-r');
+const seesaw = $('seesaw');
+const shlL = $('shl-l'), shlR = $('shl-r');
 function tilt(side) {
   seesaw.classList.toggle('tilt-l', side === 'L');
   seesaw.classList.toggle('tilt-r', side === 'R');
   shlL.classList.toggle('pressed', side === 'L');
   shlR.classList.toggle('pressed', side === 'R');
-  if (fightOn) key(side);                       // fight: latch the deflector side
+  if (inFight()) key(side);                     // latch the deflector side
 }
 shlL.onpointerdown = (e) => { e.preventDefault(); tilt('L'); };
 shlR.onpointerdown = (e) => { e.preventDefault(); tilt('R'); };
 
 /* rotary frequency knob: drag rotates the stem through 4 detents */
-const knob = document.getElementById('freq-knob');
-const stem = document.getElementById('knob-stem');
+const knob = $('freq-knob');
+const stem = $('knob-stem');
 const DETENT_ANG = [-60, -20, 20, 60];       // stem angles for 1..4
 let freq = 1;
 function setFreq(f) {
@@ -146,15 +283,14 @@ function setFreq(f) {
   stem.style.transform = `rotate(${DETENT_ANG[f - 1] + 180}deg)`;
   document.querySelectorAll('#knob-detents span').forEach(s =>
     s.classList.toggle('on', +s.dataset.f === f));
-  if (fightOn) key(f);                          // fight: set the frequency dial
+  if (inFight()) key(f);                        // set the frequency dial
 }
 knob.addEventListener('pointerdown', (e) => { e.preventDefault(); knob.setPointerCapture(e.pointerId); });
 knob.addEventListener('pointermove', (e) => {
   if (e.buttons === 0) return;
   const r = knob.getBoundingClientRect();
   const a = Math.atan2(e.clientY - (r.top + r.height / 2), e.clientX - (r.left + r.width / 2)) * 180 / Math.PI;
-  // map pointer angle (stem points down at rest) to nearest detent
-  const rel = a - 90;                        // 0 = straight down
+  const rel = a - 90;                        // 0 = stem straight down
   let best = 1, bd = 1e9;
   DETENT_ANG.forEach((d, i) => { const diff = Math.abs(rel - d); if (diff < bd) { bd = diff; best = i + 1; } });
   if (best !== freq) setFreq(best);
@@ -164,17 +300,17 @@ document.querySelectorAll('#knob-detents span').forEach(s =>
 setFreq(3);
 
 /* overcharge: hold fills the bar; release drains the capacitor (cooldown) */
-const overBtn = document.getElementById('shl-over');
-const overFill = document.getElementById('over-fill');
-const capFill = document.getElementById('cap-fill');
+const overBtn = $('shl-over');
+const overFill = $('over-fill');
+const capFill = $('cap-fill');
 let overT = null, overPct = 0;
 holdFx(overBtn,
   () => { overT = setInterval(() => {
       overPct = Math.min(100, overPct + 7);
       overFill.style.width = overPct + '%';
-      if (overPct >= 100 && fightOn && !overBtn.dataset.armed) {
+      if (overPct >= 100 && inFight() && !overBtn.dataset.armed) {
         overBtn.dataset.armed = '1';
-        key('O');                               // fight: overcharge armed
+        key('O');                               // overcharge armed
       }
     }, 60); },
   () => {
@@ -188,9 +324,15 @@ holdFx(overBtn,
   });
 
 /* ============ GUNNER — artillery station ============ */
-const crank = document.getElementById('crank');
-let crankPct = 0, lastAng = null, spinVel = 0;
-crank.addEventListener('pointerdown', (e) => { e.preventDefault(); lastAng = null; crank.setPointerCapture(e.pointerId); });
+const crank = $('crank');
+let crankPct = 0, crankSent = 0, lastAng = null, spinVel = 0, crankDragging = false;
+function paintCrank() {
+  crank.style.background = `conic-gradient(var(--accent) ${crankPct * 3.6}deg, var(--surface2) 0deg)`;
+  crank.querySelector('span').innerHTML = `crank<br>${Math.round(crankPct)}%`;
+}
+crank.addEventListener('pointerdown', (e) => { e.preventDefault(); lastAng = null; crankDragging = true; crank.setPointerCapture(e.pointerId); });
+['pointerup', 'pointercancel'].forEach(ev =>
+  crank.addEventListener(ev, () => { crankDragging = false; }));
 crank.addEventListener('pointermove', (e) => {
   if (e.buttons === 0) return;
   const r = crank.getBoundingClientRect();
@@ -203,13 +345,11 @@ crank.addEventListener('pointermove', (e) => {
   }
   lastAng = a;
 });
-let crankSent = 0;                              // fight: 'K' per 10% actually cranked
 function bumpCrank(amt) {
   crankPct = Math.min(100, crankPct + amt);
-  crank.style.background = `conic-gradient(var(--accent) ${crankPct * 3.6}deg, var(--surface2) 0deg)`;
-  crank.querySelector('span').innerHTML = `crank<br>${Math.round(crankPct)}%`;
-  if (fightOn) {
-    const steps = Math.floor(crankPct / 10);
+  paintCrank();
+  if (inFight()) {                              // 'K' per 10% actually cranked;
+    const steps = Math.floor(crankPct / 10);    // the device holds the real charge
     while (crankSent < steps) { crankSent++; key('K'); }
   }
 }
@@ -218,18 +358,18 @@ function bumpCrank(amt) {
   requestAnimationFrame(momentum);
 })();
 
-const shellPing = document.getElementById('shell-ping');
-const shellHeavy = document.getElementById('shell-heavy');
-document.getElementById('mock-load').onclick = () => {
+const shellPing = $('shell-ping');
+const shellHeavy = $('shell-heavy');
+$('mock-load').onclick = () => {              // showcase-only breach demo
   if (!shellPing.classList.contains('loaded')) shellPing.classList.add('loaded');
   else if (!shellHeavy.classList.contains('loaded')) shellHeavy.classList.add('loaded');
   else { shellPing.classList.remove('loaded'); shellHeavy.classList.remove('loaded'); }
 };
 
-const gunL = document.getElementById('gun-l'), gunR = document.getElementById('gun-r');
-const lamps = ['lampL', 'lampM', 'lampR'].map(id => document.getElementById(id));
+const gunL = $('gun-l'), gunR = $('gun-r');
+const lamps = ['lampL', 'lampM', 'lampR'].map(id => $(id));
 let aim = 1;
-function setAim(a) {
+function setAim(a) {                          // aim matters from Chorus on (M3)
   aim = a;
   lamps.forEach((l, i) => l.classList.toggle('on', i === a));
   gunL.classList.toggle('pressed', a === 0);
@@ -238,49 +378,71 @@ function setAim(a) {
 gunL.onpointerdown = (e) => { e.preventDefault(); setAim(Math.max(0, aim - 1)); };
 gunR.onpointerdown = (e) => { e.preventDefault(); setAim(Math.min(2, aim + 1)); };
 
-const fireCover = document.getElementById('fire-cover');
-const fireBtn = document.getElementById('fire');
+const fireCover = $('fire-cover');
+const fireBtn = $('fire');
 fireCover.addEventListener('pointerdown', (e) => { e.preventDefault(); fireCover.classList.add('open'); });
 holdFx(fireBtn, () => {
-  const deck = document.getElementById('deck-gun');
+  const deck = $('deck-gun');
   deck.classList.remove('kick'); void deck.offsetWidth; deck.classList.add('kick');
-  if (fightOn) key('F');                     // fight: the device checks the charge
-  if (crankPct >= 100) {                     // spend a shell + the charge
+  if (inFight()) key('F');                   // the device checks charge + shells
+  else if (crankPct >= 100) {                // showcase: local demo spend
     (shellHeavy.classList.contains('loaded') ? shellHeavy : shellPing).classList.remove('loaded');
-    crankPct = 0; crankSent = 0; bumpCrank(0);
+    crankPct = 0; crankSent = 0; paintCrank();
   }
   setTimeout(() => fireCover.classList.remove('open'), 900);   // cover snaps back
 });
 
 /* ============ HACKER — terminal ============ */
-const GLYPHS = '◇◆▲▽□■○●';
-const lines = [0, 1, 2].map(i => document.getElementById('gl' + i));
-let offs = [0, 3, 6];
+const crtLines = [0, 1, 2].map(i => $('gl' + i));
+let idleOffs = [0, 3, 6];
+const IDLE_GLYPHS = '◇◆▲▽□■○●';
+
+/* Live telemetry: during a beam telegraph (2p+) the device names the glyph —
+   the live line locks to it and the medic-relay line shows the resync key
+   while a deck is jammed. Idle: the classic wandering scramble. */
+function paintHackerCrt(s) {
+  const beam = s.glyph >= 0;
+  if (beam) {
+    crtLines.forEach((el, i) => {
+      el.classList.toggle('live', i === 1);
+      el.classList.remove('flicker');
+      el.textContent = i === 1 ? GLYPHS[s.glyph].repeat(6)
+                               : IDLE_GLYPHS.split('').sort(() => Math.random() - 0.5).slice(0, 6).join('');
+    });
+  } else if (s.jam >= 0) {
+    crtLines[0].textContent = 'DECK ' + ROLE_NAMES[s.jam].toUpperCase();
+    crtLines[1].textContent = 'RESYNC KEY → ' + (s.rsy + 1);
+    crtLines[2].textContent = 'RELAY TO MEDIC';
+    crtLines.forEach((el, i) => { el.classList.toggle('live', i === 1); el.classList.remove('flicker'); });
+  }
+  // otherwise the idle scrambler below keeps drifting
+}
 setInterval(() => {
-  lines.forEach((el, i) => {
-    offs[i] = (offs[i] + 1) % GLYPHS.length;
+  if (snap && (snap.glyph >= 0 || snap.jam >= 0)) return;   // real telemetry owns the CRT
+  crtLines.forEach((el, i) => {
+    idleOffs[i] = (idleOffs[i] + 1) % IDLE_GLYPHS.length;
     let s = '';
-    for (let k = 0; k < 6; k++) s += GLYPHS[(offs[i] + k * 2 + i) % GLYPHS.length];
+    for (let k = 0; k < 6; k++) s += IDLE_GLYPHS[(idleOffs[i] + k * 2 + i) % IDLE_GLYPHS.length];
     el.textContent = s;
   });
 }, 450);
-setInterval(() => {                          // live line wanders; sometimes it flickers (feint demo)
+setInterval(() => {                          // idle: live line wanders
+  if (snap && (snap.glyph >= 0 || snap.jam >= 0)) return;
   const live = Math.floor(Math.random() * 3);
-  const feint = Math.random() < 0.3;
-  lines.forEach((el, i) => {
+  crtLines.forEach((el, i) => {
     el.classList.toggle('live', i === live);
-    el.classList.toggle('flicker', i === live && feint);
+    el.classList.remove('flicker');
   });
 }, 3500);
 
-/* waveform strip: square wave at the "boss frequency" (mock: matches knob) */
-const wf = document.getElementById('waveform');
+/* waveform strip: square wave at the knob frequency (a teaching aid) */
+const wf = $('waveform');
 (function drawWave() {
   const ctx = wf.getContext('2d');
   const t = performance.now() / 1000;
   ctx.fillStyle = '#0d0d0d'; ctx.fillRect(0, 0, wf.width, wf.height);
   ctx.strokeStyle = '#f5a623'; ctx.lineWidth = 2; ctx.beginPath();
-  const period = 60 / (freq * 1.6 + 1);      // knob freq shapes the wave — a teaching aid
+  const period = 60 / (freq * 1.6 + 1);
   for (let x = 0; x < wf.width; x++) {
     const phase = ((x + t * 40) % period) / period;
     const y = phase < 0.5 ? 6 : wf.height - 6;
@@ -290,10 +452,10 @@ const wf = document.getElementById('waveform');
   requestAnimationFrame(drawWave);
 })();
 
-const scanBtn = document.getElementById('scan'), scanArc = document.getElementById('scan-arc');
+const scanBtn = $('scan'), scanArc = $('scan-arc');
 let scanning = false;
-holdFx(scanBtn, () => {
-  if (scanning) return;
+holdFx(scanBtn, () => {                       // cooldown feel only — scan gains a
+  if (scanning) return;                       // real effect with MOTH's feints (M2)
   scanning = true; scanBtn.disabled = true;
   const t0 = performance.now();
   (function arc() {
@@ -304,51 +466,64 @@ holdFx(scanBtn, () => {
   })();
 });
 
-/* codebook: glyph→freq mapping, reshuffled per page load ("per fight") */
-(function codebook() {
-  const cb = document.getElementById('codebook');
-  const picks = [...'◇◆▲▽'].sort(() => Math.random() - 0.5);
-  picks.forEach((g, i) => {
+/* codebook: glyph→freq mapping. The DEVICE rolls it per fight (§7.5) and
+   echoes it in the snapshot; before the first fight, show a local shuffle. */
+let codeShown = '';
+function paintCodebook(code) {
+  const sig = code ? code.join('') : '';
+  if (sig === codeShown) return;
+  codeShown = sig;
+  const cb = $('codebook');
+  cb.innerHTML = '';
+  (code || [1, 2, 3, 4]).forEach((f, i) => {
     const s = document.createElement('span');
-    s.innerHTML = `${g}&thinsp;=&thinsp;<b>${i + 1}</b>`;
+    s.innerHTML = `${GLYPHS[i]}&thinsp;=&thinsp;<b>${f}</b>`;
     cb.appendChild(s);
   });
-})();
+}
+paintCodebook(null);
 
 /* ============ MEDIC — workbench ============ */
 let forgeNext = 1;
-const sendBtn = document.getElementById('send-shell');
-document.querySelectorAll('.node').forEach(n => {
+const sendBtn = $('send-shell');
+document.querySelectorAll('.node:not(.rsy)').forEach(n => {
   n.onpointerdown = (e) => {
     e.preventDefault();
     if (+n.dataset.n === forgeNext) { n.classList.add('lit'); forgeNext++; }
-    else { document.querySelectorAll('.node').forEach(x => x.classList.remove('lit')); forgeNext = 1; }
-    // 1→2 alone is a valid PING forge; 1→4 is a heavy
-    sendBtn.disabled = !(forgeNext === 3 || forgeNext === 5);
-    sendBtn.textContent = forgeNext === 3 ? 'send ping' : forgeNext === 5 ? 'send heavy' : 'send to gunner';
+    else { document.querySelectorAll('.node:not(.rsy)').forEach(x => x.classList.remove('lit')); forgeNext = 1; }
+    sendBtn.disabled = forgeNext !== 5;       // VANTA: full 4-node trace
+    sendBtn.textContent = forgeNext === 5 ? 'send shell' : 'send to gunner';
   };
 });
 sendBtn.onclick = () => {
-  const heavy = forgeNext === 5;
-  document.querySelectorAll('.node').forEach(x => x.classList.remove('lit'));
+  document.querySelectorAll('.node:not(.rsy)').forEach(x => x.classList.remove('lit'));
   forgeNext = 1; sendBtn.disabled = true; sendBtn.textContent = 'send to gunner';
-  const cap = document.getElementById('capsule');
+  const cap = $('capsule');
   cap.classList.remove('whoosh'); void cap.offsetWidth; cap.classList.add('whoosh');
-  setTimeout(() => {                          // …thunks into the gunner's breach
-    (heavy ? shellHeavy : shellPing).classList.add('loaded');
+  if (inFight()) key('T');                    // device loads the breach (2p+ rule)
+  setTimeout(() => {
+    if (!inFight()) shellPing.classList.add('loaded');   // showcase demo thunk
     cap.classList.remove('whoosh');
   }, 600);
 };
 
-/* triage board: mock alerts wander */
+/* resync pad — the key is relayed from the hacker's screen */
+document.querySelectorAll('.node.rsy').forEach(n =>
+  n.onpointerdown = (e) => { e.preventDefault(); key(String.fromCharCode(97 + +n.dataset.r)); });
+
+/* triage board: driven by the snapshot in-fight; idle keeps the wander demo */
 setInterval(() => {
-  const icons = ['tri-shl', 'tri-gun', 'tri-hck', 'tri-med'].map(id => document.getElementById(id));
+  if (snap) return;
+  const icons = ROLE_KEYS.map(r => $('tri-' + r));
   icons.forEach(i => i.classList.remove('alert'));
   if (Math.random() < 0.6) icons[Math.floor(Math.random() * 4)].classList.add('alert');
 }, 4000);
 
-/* wipe pad */
-const pad = document.getElementById('wipe-pad');
+/* wipe pad: in-fight, slimes appear when acid lands anywhere (the medic wipes
+   the afflicted deck from the bench). Each scrub stroke that lands sends 'W' —
+   the device counts 6 to a clean deck. Idle: ambient slime demo. */
+const pad = $('wipe-pad');
+let lastWipeSent = 0;
 function spawnSlime() {
   if (pad.querySelectorAll('.slime').length >= 4) return;
   const s = document.createElement('div');
@@ -358,21 +533,32 @@ function spawnSlime() {
   s.dataset.hp = 6;
   pad.appendChild(s);
 }
-setInterval(spawnSlime, 2600); spawnSlime(); spawnSlime();
+function syncSlimes(s) {
+  const acidOn = s.acid >= 0 && inFight();
+  const have = pad.querySelectorAll('.slime').length;
+  if (acidOn && have < Math.ceil(s.acidHp / 2)) spawnSlime();
+  if (!acidOn && snap && have) pad.querySelectorAll('.slime').forEach(x => x.remove());
+}
+setInterval(() => { if (!snap) spawnSlime(); }, 2600);
+spawnSlime(); spawnSlime();
 pad.addEventListener('pointermove', (e) => {
   if (e.buttons === 0) return;
-  pad.querySelectorAll('.slime').forEach(s => {
-    const r = s.getBoundingClientRect();
+  pad.querySelectorAll('.slime').forEach(sl => {
+    const r = sl.getBoundingClientRect();
     if (e.clientX >= r.left - 6 && e.clientX <= r.right + 6 &&
         e.clientY >= r.top - 6 && e.clientY <= r.bottom + 6) {
-      if (--s.dataset.hp <= 0) s.remove();
-      else s.style.opacity = s.dataset.hp / 6;
+      if (--sl.dataset.hp <= 0) sl.remove();
+      else sl.style.opacity = sl.dataset.hp / 6;
+      if (inFight() && snap && snap.acid >= 0 && Date.now() - lastWipeSent > 120) {
+        lastWipeSent = Date.now();
+        key('W');
+      }
     }
   });
 });
 
-/* repair: hold fills the collar */
-const repBtn = document.getElementById('repair'), collar = document.getElementById('rep-collar');
+/* repair: hold fills the collar (hull repair is a gauntlet-mod mechanic — M3) */
+const repBtn = $('repair'), collar = $('rep-collar');
 let repT = null, rep = 0;
 holdFx(repBtn,
   () => { repT = setInterval(() => {
@@ -382,11 +568,10 @@ holdFx(repBtn,
   () => { clearInterval(repT); if (rep >= 100) rep = 0;
           if (!rep) collar.style.background = ''; });
 
-/* ============ PILOT — cockpit ============ */
-/* the alert diamond points at a random quadrant every few seconds */
-const quads = ['q-shl', 'q-gun', 'q-hck', 'q-med'].map(id => document.getElementById(id));
-const diamond = document.getElementById('alert-diamond');
-const DIA_POS = [                            // toward each quadrant
+/* ============ PILOT — cockpit (visual mockup; the real one is M2) ============ */
+const quads = ['q-shl', 'q-gun', 'q-hck', 'q-med'].map(id => $(id));
+const diamond = $('alert-diamond');
+const DIA_POS = [
   'translate(-140%,-140%) rotate(45deg)', 'translate(40%,-140%) rotate(45deg)',
   'translate(-140%,40%) rotate(45deg)',   'translate(40%,40%) rotate(45deg)'];
 setInterval(() => {
@@ -394,12 +579,10 @@ setInterval(() => {
   quads.forEach((el, i) => el.classList.toggle('alert', i === q));
   diamond.style.transform = DIA_POS[q];
 }, 3000);
-/* mini glyphs tick */
 setInterval(() => {
-  const g = document.getElementById('mini-glyph');
-  g.textContent = [...'◇◆▲▽□■'].sort(() => Math.random() - 0.5).slice(0, 3).join('');
+  const g = $('mini-glyph');
+  g.textContent = IDLE_GLYPHS.split('').sort(() => Math.random() - 0.5).slice(0, 3).join('');
 }, 1200);
-/* pilot mini buttons: press feedback only */
 document.querySelectorAll('#deck-pil .segmented-btn').forEach(b =>
   b.addEventListener('pointerdown', (e) => {
     e.preventDefault();
@@ -409,4 +592,5 @@ document.querySelectorAll('#deck-pil .segmented-btn').forEach(b =>
 /* ---------------- boot ---------------- */
 buildBossStrip();
 buildAnimGrid();
+renderFlow();
 connectWS();

@@ -25,3 +25,9 @@ bool gameStart(const char* name, Renderer& r);
 void gameInput(uint8_t player, char key, bool pressed);
 // Advance/render; games pace themselves off nowMs. True if the canvas changed.
 bool gameTick(Renderer& r, uint32_t nowMs);
+// Device→deck state channel: if the running game publishes network snapshots
+// (Raid 16's ~10 Hz idempotent deck state), copy the latest JSON into buf and
+// return its length; 0 = nothing to send / game has no net layer. main.cpp
+// polls this at ~10 Hz while a whole-canvas game is active and broadcasts the
+// result to every WebSocket client.
+size_t gameNetSnapshot(char* buf, size_t cap);

@@ -4,10 +4,11 @@
 #include <string.h>
 
 // ---------------------------------------------------------------------------
-// Raid 16 — boss showcase (M0.5). Five parametric face anatomies, each with
-// its signature animations from the v0.2 spec. No sprite sheets: faces are
-// drawn from state each tick, which is exactly how the M1 fight engine will
-// drive them. Brightness discipline: dim 30–70 / body 200 / highlight 255.
+// Raid 16 — the M0.5 boss showcase (five parametric face anatomies with their
+// signature animations) plus the M1 fight engine below it (weighted-deck
+// telegraphs, phases, moods, lobby, win/lose/stats — see the block comment at
+// the engine). No sprite sheets: faces are drawn from state each tick.
+// Brightness discipline: dim 30–70 / body 200 / highlight 255.
 // ---------------------------------------------------------------------------
 
 #define RD_TICKMS 70
@@ -30,7 +31,6 @@ static uint16_t rdT;
 static uint32_t rdLast;
 static float    rdPY[6]; static int8_t rdPX[6];   // particle pool
 static uint8_t  rdMelt[16];
-static bool     fOn = false;                       // fight mode active (engine below)
 
 static void rdReset(uint8_t idx) {
     rdAnimIdx = idx % ANIM_N[rdBoss];
@@ -50,11 +50,12 @@ void raidInit(Renderer& r) {
     rdSetBoss(VANTA);
 }
 
-static bool fightInput(char k);   // fwd (fight code sits below the showcase)
+static bool fightInput(uint8_t p, char k);   // fwd (fight engine sits below the showcase)
+static bool fightActive();                   // fwd — true whenever the fight flow owns the screen
 
-void raidInput(uint8_t, char k, bool pressed) {
+void raidInput(uint8_t p, char k, bool pressed) {
     if (!pressed) return;
-    if (k == 'G' || fOn) { fightInput(k); return; }
+    if (k == 'G' || fightActive()) { fightInput(p, k); return; }
     switch (k) {
         case 'V': rdSetBoss(VANTA);   return;
         case 'M': rdSetBoss(MOTH);    return;
@@ -608,135 +609,510 @@ static void tickNull(Renderer& r) {
     }
 }
 
-// ======================= M1 slice: the VANTA fight =========================
-// Solo-sim rules (docs/raid16.md §4): no decode layer — the boss blinks its
-// beam frequency openly; read the panel, work the deck. Keys ride the normal
-// input path: G start/restart, Q quit, L/R shield side, 1-4 freq dial,
-// O overcharge, K crank (+10%), F fire. Boss HP bar = top stage row; hull =
-// the 8-segment bar below it. Beat the enrage timer or grin-wipe.
-enum FPhase : uint8_t { F_GAP, F_TELE, F_RESOLVE, F_WIN, F_LOSE };
-static uint8_t  fPhase, fType;          // 0 sweepL 1 sweepR 2 beam 3 charge
-static uint8_t  fFreq;                  // beam frequency 1..4
-static int16_t  fHP; static int8_t fHull;
-static uint16_t fPT, fGapT, fWin;       // phase ticks, gap length, window length
-static uint8_t  fSide, fDial;           // latched responses (side clears; dial persists)
-static bool     fOver, fOk;
-static uint8_t  fCrank;
-static uint16_t fVuln, fEnrage;
-static uint8_t  fFxShot;
 
-static void fightStart() {
-    fOn = true; fPhase = F_GAP; fPT = 0; fGapT = 30;
-    fHP = 100; fHull = 8; fSide = 0; fDial = 0; fOver = false;
-    fCrank = 0; fVuln = 0; fEnrage = 1700;      // ~2 min at 70 ms/tick
-    fFxShot = 0;
-    memset(rdMelt, 0, sizeof(rdMelt));
+// ========================== M1: the VANTA fight ============================
+// docs/raid16.md §11 M1 — "one real fight": weighted deck-draw telegraph
+// engine with pity rules, VANTA's three phases + moods, response windows,
+// hull, vulnerability windows, lobby, and win/lose/stats. The device is
+// authoritative (§0.6): decks send single-char keys over the game input
+// path, and raidNet() publishes a ~10 Hz idempotent JSON snapshot that each
+// deck filters down to what its role should see — phones never mirror the
+// telegraphs themselves (§0.4); reading the panel stays the game.
+//
+// Party scaling (§4, M1 subset): party size 1 keeps the solo-sim rules — no
+// decode layer (the boss blinks its frequency openly), no shell pipeline, no
+// acid/jam/lane fire. At 2-4 players the beam frequency arrives as a glyph
+// the Hacker decodes against a per-fight codebook, shells must be forged and
+// sent by the Medic before the Gunner can fire, acid/jam telegraphs disable
+// decks until the Medic fixes them, and P3 adds per-deck lane shots to dodge.
+// Deck *bundles* for 2-3 players are M2 — at M1 those parties share the four
+// role tabs.
+//
+// Fight keys: L/R shield rocker · 1-4 freq dial (party size in the lobby) ·
+// O overcharge · K crank +10% · F fire · T send shell (medic) · W wipe
+// stroke · a-d resync pad · X dodge (sender's player number must match the
+// targeted lane) · G start/advance · Q quit/back.
+
+#define SEC(s) ((uint16_t)((s) * 1000 / RD_TICKMS))
+
+enum FState : uint8_t { ST_IDLE, ST_LOBBY, ST_INTRO, ST_FIGHT, ST_WIN, ST_LOSE, ST_STATS };
+enum FPhase : uint8_t { F_GAP, F_TELE, F_RESOLVE, F_TAUNT };
+enum Tele   : uint8_t { T_SWEEP_L, T_SWEEP_R, T_BEAM, T_CHARGE, T_ACID, T_JAM, T_N };
+enum Role   : int8_t  { R_SHIELD = 0, R_GUNNER = 1, R_HACKER = 2, R_MEDIC = 3 };
+
+// Mood: rolled at fight start, announced on the intro nameplate, readable in
+// the idle stance (§7.2). Weight deltas skew the telegraph deck; winScale
+// stretches/compresses every response window.
+struct MoodDef { const char* name; uint8_t sweepW, beamW; float winScale; };
+static const MoodDef MOODS[3] = {
+    { "COLD",    0, 0, 1.00f },   // baseline — the textbook fight
+    { "CURIOUS", 0, 2, 1.15f },   // more beams, windows +15%
+    { "STERN",   2, 0, 0.85f },   // more sweeps, windows -15%
+};
+
+// Telegraph draw weights per phase (deck-draw, §7.1). Acid/jam join in P2.
+static const uint8_t TELE_W[3][T_N] = {
+    // swL swR beam chg acid jam
+    {  3,  3,  3,  2,  0,  0 },
+    {  2,  2,  3,  2,  2,  2 },
+    {  3,  3,  3,  3,  1,  1 },
+};
+// Cadence: seconds of idle gap between telegraphs per phase (FIELD 4p
+// baseline, §3.1), scaled by party size (§4 auto-normalization).
+static const uint8_t GAP_S[3][2]  = { { 8, 10 }, { 6, 8 }, { 4, 6 } };
+static const float   PARTY_CAD[5] = { 1.0f, 0.5f, 0.65f, 0.8f, 1.0f };
+
+static FState   fState = ST_IDLE;
+static uint8_t  fParty = 1;
+static uint8_t  fMood;
+static FPhase   fPhase; static uint8_t fPhaseNo;   // fight sub-state, phase 1..3
+static uint8_t  fType;                             // active telegraph
+static uint8_t  fFreq, fGlyph;                     // beam: frequency + hacker glyph
+static uint8_t  fCode[4];                          // codebook: glyph -> frequency 1..4
+static int16_t  fHP; static int8_t fHull;
+static uint16_t fPT, fGapT, fWin;                  // state ticks, gap length, window
+static uint8_t  fSide, fDial; static bool fOver, fOk;
+static uint8_t  fCrank, fShells;
+static uint16_t fVuln; static int16_t fEnrage;     // enrage <0 = not armed (pre-P3)
+static uint8_t  fFxShot;
+static int8_t   fAcid; static uint8_t fAcidHP;     // acided role / wipe strokes left
+static int8_t   fJam;  static uint8_t fResync;     // jammed role / resync key 0-3
+static int8_t   fLane; static uint16_t fLaneT, fLaneGap;   // P3 lane shots
+static uint8_t  fLast1, fLast2;                    // pity: last two telegraph draws
+static uint16_t fSinceBeam;                        // pity: forced window opportunity
+static uint32_t fEv; static char fEvName[12];      // one-shot deck feedback events
+
+static struct {
+    uint16_t t;                                    // fight length, ticks
+    uint8_t  blk, miss, itr, wip, fix, shots, hullLost;
+    uint16_t dmg, vdmg;
+    const char* res;                               // "", "win", "wipe"
+} fStats;
+
+static bool fightActive() { return fState != ST_IDLE; }
+
+static void fEvent(const char* n) {
+    fEv++;
+    strncpy(fEvName, n, sizeof(fEvName) - 1);
+    fEvName[sizeof(fEvName) - 1] = 0;
 }
+
+// A role whose deck is acided or jammed is disabled — its inputs are ignored
+// until the Medic fixes it (the indirect damage of §2: a downed Shield can't
+// block). The Medic's own wipe/resync keys always work.
+static bool roleDown(int8_t role) { return fAcid == role || fJam == role; }
+
+static uint16_t rollGap() {
+    uint16_t lo = SEC(GAP_S[fPhaseNo - 1][0]), hi = SEC(GAP_S[fPhaseNo - 1][1]);
+    uint16_t g = lo + esp_random() % (uint16_t)(hi - lo + 1);
+    return (uint16_t)(g * PARTY_CAD[fParty]);
+}
+static uint16_t rollWin(uint8_t t) {
+    uint16_t base = t == T_BEAM ? SEC(4) : (t == T_CHARGE ? SEC(3) : SEC(2.5f));
+    if (t == T_ACID || t == T_JAM) base = SEC(1.5f);   // land animation, not a window
+    return (uint16_t)(base * MOODS[fMood].winScale);
+}
+static uint16_t rollLaneGap() { return SEC(4) + esp_random() % SEC(2); }
+
+// Deck-draw with pity rules (§7.1): weights per phase, skewed by mood; never
+// the same telegraph three times running; a beam (the only window opener) is
+// guaranteed at least every 45 s. Acid/jam are 2p+ only and one-at-a-time.
+static uint8_t drawTele() {
+    if (fSinceBeam > SEC(45)) return T_BEAM;
+    uint8_t w[T_N]; uint16_t tot = 0;
+    for (uint8_t t = 0; t < T_N; t++) {
+        w[t] = TELE_W[fPhaseNo - 1][t];
+        if (t == T_SWEEP_L || t == T_SWEEP_R) w[t] += MOODS[fMood].sweepW;
+        if (t == T_BEAM)                      w[t] += MOODS[fMood].beamW;
+        if ((t == T_ACID || t == T_JAM) && fParty < 2) w[t] = 0;
+        if (t == T_ACID && fAcid >= 0) w[t] = 0;
+        if (t == T_JAM  && fJam  >= 0) w[t] = 0;
+        if (t == fLast1 && t == fLast2) w[t] = 0;   // pity: no 3x running
+        tot += w[t];
+    }
+    if (!tot) return T_BEAM;   // unreachable with these tables, but never div-0
+    uint16_t roll = esp_random() % tot;
+    for (uint8_t t = 0; t < T_N; t++) { if (roll < w[t]) return t; roll -= w[t]; }
+    return T_BEAM;
+}
+
+static void toWin()  { fState = ST_WIN;  fPT = 0; fStats.res = "win";
+                       memset(rdMelt, 0, sizeof(rdMelt)); fEvent("win");  }
+static void toLose() { fState = ST_LOSE; fPT = 0; fStats.res = "wipe"; fEvent("wipe"); }
+
+// Phase gates at HP thresholds (66/33) fire a ~2 s taunt interstitial; P3
+// entry arms the 90 s enrage timer — chip damage can't beat it (§2), the
+// vulnerability windows are the win condition.
+static void checkPhase() {
+    uint8_t want = fHP > 66 ? 1 : (fHP > 33 ? 2 : 3);
+    if (want > fPhaseNo) {
+        fPhaseNo = want;
+        fPhase = F_TAUNT; fPT = 0;
+        if (fPhaseNo == 3) { fEnrage = SEC(90); fLaneGap = rollLaneGap(); }
+        fEvent("phase");
+    }
+}
+
+static void bossDamage(int d, bool vuln) {
+    fHP -= d;
+    fStats.dmg += d;
+    if (vuln) fStats.vdmg += d;
+    if (fHP <= 0) { fHP = 0; toWin(); return; }
+    checkPhase();
+}
+
+static void hullHit(int8_t n) {
+    fHull -= n;
+    fStats.hullLost += n;
+    if (fHull <= 0) { fHull = 0; toLose(); }
+}
+
 static void fireShot() {
     if (fCrank < 100) return;
-    fCrank = 0; fFxShot = 4;
-    if (fPhase == F_TELE && fType == 3) {        // charge interrupt!
-        fHP -= 4; fOk = true; fPhase = F_RESOLVE; fPT = 0; return;
+    if (fParty >= 2) {                       // 4p rules: no shell, no shot (§5)
+        if (!fShells) { fEvent("noshell"); return; }
+        fShells--;
     }
-    fHP -= (fVuln > 0) ? 9 : 3;
+    fCrank = 0; fFxShot = 4; fStats.shots++;
+    if (fPhase == F_TELE && fType == T_CHARGE) {   // charge interrupt!
+        fStats.itr++; fOk = true; fPhase = F_RESOLVE; fPT = 0;
+        bossDamage(4, false); fEvent("interrupt");
+        return;
+    }
+    if (fVuln) { bossDamage(9, true); fEvent("vulnhit"); }
+    else       { bossDamage(3, false); fEvent("hit"); }
 }
-static bool fightInput(char k) {
-    if (k == 'G') { fightStart(); return true; }
-    if (!fOn) return false;
-    if (k == 'Q') { fOn = false; rdReset(0); return true; }
-    if (k == 'L') { fSide = 1; return true; }
-    if (k == 'R') { fSide = 2; return true; }
-    if (k >= '1' && k <= '4') { fDial = k - '0'; return true; }
-    if (k == 'O') { fOver = true; return true; }
-    if (k == 'K') { fCrank = fCrank > 90 ? 100 : fCrank + 10; return true; }
-    if (k == 'F') { fireShot(); return true; }
-    return true;                                 // swallow everything else mid-fight
+
+static void fightBegin() {
+    fMood = esp_random() % 3;
+    for (uint8_t i = 0; i < 4; i++) fCode[i] = i + 1;    // codebook: shuffle 1..4
+    for (int8_t i = 3; i > 0; i--) {                     // (reshuffled per fight, §7.5)
+        uint8_t j = esp_random() % (i + 1);
+        uint8_t t = fCode[i]; fCode[i] = fCode[j]; fCode[j] = t;
+    }
+    fHP = 100; fHull = 10;                               // FIELD baselines (§6)
+    fPhaseNo = 1; fPhase = F_GAP;
+    fSide = 0; fDial = 0; fOver = false; fOk = false;
+    fCrank = 0; fShells = fParty >= 2 ? 1 : 0;           // one shell pre-loaded for flow
+    fVuln = 0; fEnrage = -1; fFxShot = 0;
+    fAcid = -1; fAcidHP = 0; fJam = -1; fLane = -1;
+    fLast1 = fLast2 = T_N; fSinceBeam = 0;
+    memset(&fStats, 0, sizeof(fStats)); fStats.res = "";
+    memset(rdMelt, 0, sizeof(rdMelt));
+    rdSetBoss(VANTA);                                    // fight rendering reuses VANTA parts
+    fState = ST_INTRO; fPT = 0;
+    fEvent("intro");
 }
+
+// All fight-flow input. Returns true when the key was consumed (everything is,
+// once the fight flow owns the screen — stray showcase keys must not leak).
+static bool fightInput(uint8_t p, char k) {
+    switch (fState) {
+    case ST_IDLE:
+        if (k == 'G') { fState = ST_LOBBY; fEvent("lobby"); return true; }
+        return false;
+    case ST_LOBBY:
+        if (k >= '1' && k <= '4') { fParty = k - '0'; return true; }
+        if (k == 'G') { fightBegin(); return true; }
+        if (k == 'Q') { fState = ST_IDLE; rdReset(0); return true; }
+        return true;
+    case ST_INTRO:
+        if (k == 'Q') { fState = ST_LOBBY; return true; }
+        return true;
+    case ST_STATS:
+        if (k == 'G') { fightBegin(); return true; }     // rematch
+        if (k == 'Q') { fState = ST_LOBBY; return true; }
+        return true;
+    case ST_WIN: case ST_LOSE:
+        return true;                                     // let the animation finish
+    case ST_FIGHT:
+        switch (k) {
+        case 'Q': fState = ST_LOBBY; fEvent("abandon"); return true;
+        case 'L': if (!roleDown(R_SHIELD)) fSide = 1; return true;
+        case 'R': if (!roleDown(R_SHIELD)) fSide = 2; return true;
+        case '1': case '2': case '3': case '4':
+            if (!roleDown(R_SHIELD)) fDial = k - '0';
+            return true;
+        case 'O': if (!roleDown(R_SHIELD)) fOver = true; return true;
+        case 'K':
+            if (!roleDown(R_GUNNER)) fCrank = fCrank > 90 ? 100 : fCrank + 10;
+            return true;
+        case 'F': if (!roleDown(R_GUNNER)) fireShot(); return true;
+        case 'T':                                        // medic sends a forged shell
+            if (fParty >= 2 && !roleDown(R_MEDIC) && fShells < 2) {
+                fShells++; fEvent("shell");
+            }
+            return true;
+        case 'W':                                        // wipe stroke (always allowed)
+            if (fAcid >= 0 && fAcidHP > 0 && --fAcidHP == 0) {
+                fAcid = -1; fStats.wip++; fEvent("wiped");
+            }
+            return true;
+        case 'a': case 'b': case 'c': case 'd':          // resync pad
+            if (fJam >= 0) {
+                if ((uint8_t)(k - 'a') == fResync) { fJam = -1; fStats.fix++; fEvent("resync"); }
+                else { fResync = esp_random() % 4; fEvent("rsyfail"); }
+            }
+            return true;
+        case 'X':                                        // dodge — must come from the targeted deck
+            if (fLane >= 0 && (int8_t)p == fLane) {
+                fLane = -1; fLaneGap = rollLaneGap(); fEvent("dodge");
+            }
+            return true;
+        }
+        return true;
+    }
+    return true;
+}
+
+// --- per-state panel rendering + advancement (all at RD_TICKMS) ---
+
+static void lobbyTick(Renderer& r) {
+    // Vanta idles while the party gathers; party-size pips along the bottom.
+    int ex = (rdT / 25) % 3 - 1;
+    rdBrow(r, ex, false); rdEyes(r, ex, (rdT % 43) < 2, ex); rdMouth(r, 0, false);
+    for (uint8_t i = 0; i < 4; i++)
+        r.setPixel(4 + i * 2, rdH - 2, i < fParty ? 255 : 40);
+    rdStage(r, 8, false);
+}
+
+static void introTick(Renderer& r) {
+    // Nameplate scroll ("VANTA THE CURIOUS", §7.2) then a 3-2-1 wake countdown.
+    fPT++;
+    char plate[24];
+    snprintf(plate, sizeof(plate), "VANTA THE %s", MOODS[fMood].name);
+    int len = (int)strlen(plate);
+    int scrollTicks = (rdW + len * 6) / 2 + 1;           // 2 px/tick
+    if ((int)fPT < scrollTicks) {
+        int x = rdW - fPT * 2;
+        for (int i = 0; i < len; i++) r.drawChar(x + i * 6, 4, plate[i], 255);
+        return;
+    }
+    int c = (fPT - scrollTicks) / SEC(1);
+    if (c >= 3) {
+        fState = ST_FIGHT; fPhase = F_GAP; fPT = 0;
+        fGapT = SEC(2);                                  // short opening grace
+        fEvent("fight");
+        return;
+    }
+    rdBrow(r, 0, false); rdEyes(r, 0, c == 0, 0);        // the boss wakes at "2"
+    rdMouth(r, 0, false);
+    r.drawChar((rdW - 5) / 2, (rdFaceH - 7) / 2, (char)('3' - c), 255);
+}
+
 static void fightDrawBars(Renderer& r) {
-    if (rdStageY < 0) return;
-    int lit = fHP > 0 ? (fHP * rdW + 99) / 100 : 0;   // boss HP across the top stage row
+    if (rdStageY < 0) return;                            // 16x16: decks carry the bars
+    int lit = fHP > 0 ? (fHP * rdW + 99) / 100 : 0;      // boss HP across the top stage row
     for (int x = 0; x < lit && x < rdW; x++)
         r.setPixel(x, rdStageY, fVuln > 0 && (rdT & 2) ? 255 : 200);
-    rdStage(r, fHull, fEnrage < 300);            // hull + burning frame near enrage
+    rdStage(r, (fHull * 8 + 9) / 10, fEnrage >= 0 && fEnrage < SEC(20));
     if (fCrank >= 100 && (rdT & 2)) r.setPixel(rdW - 1, rdH - 1, 255);   // "gun hot" pip
 }
+
 static void fightTick(Renderer& r) {
-    fPT++;
+    fPT++; fStats.t++;
     if (fVuln) fVuln--;
-    if (fFxShot) { fFxShot--;                    // muzzle flash column at the boss
-        for (int y = 6; y < rdFaceH; y++) r.setPixel(12, y, 255); }
-    if (fPhase != F_WIN && fPhase != F_LOSE) {
-        if (fHP <= 0)  { fPhase = F_WIN;  fPT = 0; }
-        if (fHull <= 0 || --fEnrage == 0) { fPhase = F_LOSE; fPT = 0; }
+    fSinceBeam++;
+    if (fEnrage > 0 && --fEnrage == 0) { toLose(); return; }
+
+    // P3 lane fire (2p+): a lane shot telegraphs on one deck; that deck must
+    // dodge before impact. Runs alongside the main telegraph loop.
+    if (fPhaseNo == 3 && fParty >= 2 && fState == ST_FIGHT) {
+        if (fLane < 0) {
+            if (fLaneGap > 0 && --fLaneGap == 0) {
+                fLane = esp_random() % 4; fLaneT = SEC(2); fEvent("lane");
+            }
+        } else if (--fLaneT == 0) {
+            fLane = -1; fLaneGap = rollLaneGap();
+            hullHit(1); fEvent("lanehit");
+            if (fState != ST_FIGHT) return;
+        }
     }
+
+    if (fFxShot) { fFxShot--;                            // muzzle flash at the boss
+        for (int y = 6; y < rdFaceH; y++) r.setPixel(12, y, 255); }
+
     switch (fPhase) {
-    case F_GAP:
-        rdBrow(r, 0, false); rdEyes(r, 0, (fPT % 40) < 2, 0);
-        rdMouth(r, fVuln > 0 ? 2 : 0, false);    // vuln: mouth hangs open — shoot it
+    case F_GAP: {
+        int ex = fMood == 1 ? ((rdT / 12) % 3) - 1 : 0;  // curious eyes wander
+        rdBrow(r, ex, fMood == 2); rdEyes(r, ex, (fPT % 40) < 2, ex);
+        rdMouth(r, fVuln > 0 ? 2 : 0, false);            // vuln: mouth hangs open — shoot it
         if (fPT >= fGapT) {
-            fType = esp_random() % 4;
-            fFreq = 1 + esp_random() % 4;
-            fWin  = fType == 2 ? 57 : (fType == 3 ? 43 : 36);
+            fType = drawTele();
+            fLast2 = fLast1; fLast1 = fType;
+            if (fType == T_BEAM) {
+                fSinceBeam = 0;
+                if (fParty >= 2) { fGlyph = esp_random() % 4; fFreq = fCode[fGlyph]; }
+                else             { fFreq = 1 + esp_random() % 4; }
+            }
+            if (fType == T_ACID)                          // reuse the spew particle pool
+                for (int i = 0; i < 3; i++) { rdPY[i] = 13; rdPX[i] = 6 + esp_random() % 4; }
+            fWin  = rollWin(fType);
             fSide = 0; fOver = false;
             fPhase = F_TELE; fPT = 0;
         }
         break;
+    }
     case F_TELE: {
-        if (fType <= 1) {                        // sweep: eyes + edge ripple
-            int dir = fType == 0 ? -1 : 1;
+        if (fType <= T_SWEEP_R) {                        // sweep: eyes + edge ripple
+            int dir = fType == T_SWEEP_L ? -1 : 1;
             rdBrow(r, dir * 2, true); rdEyes(r, dir * 2, false, dir);
             rdMouth(r, 0, false);
             if (fPT & 1) { int e = dir < 0 ? 0 : rdW - 1;
                 for (int y = 0; y < rdFaceH; y++) r.setPixel(e, y, 255); }
-        } else if (fType == 2) {                 // beam: blink code = the frequency
+        } else if (fType == T_BEAM) {                    // beam: blink code = the frequency
             int cyc = fFreq * 8 + 14, ph = fPT % cyc;
             bool closed = ph < fFreq * 8 && (ph % 8) < 4;
             rdBrow(r, 0, true); rdEyes(r, 0, closed, 0); rdMouth(r, 0, false);
-        } else {                                 // charge: mouth opens on a timer
+        } else if (fType == T_CHARGE) {                  // charge: mouth opens on a timer
             rdBrow(r, 0, true); rdEyes(r, 0, false, 0);
             rdMouth(r, 1 + fPT * 3 / fWin, false);
+        } else if (fType == T_ACID) {                    // acid: glops fall from the mouth
+            rdBrow(r, 0, true); rdEyes(r, 0, false, 0); rdMouth(r, 2, false);
+            for (int i = 0; i < 3; i++) {
+                rdPY[i] += 0.8f;
+                if (rdPY[i] > rdH - 1) { rdPY[i] = 13; rdPX[i] = 6 + esp_random() % 4; }
+                if (rdPY[i] >= 13 && rdPY[i] <= rdH - 2)
+                    r.setPixel(rdPX[i] ? rdPX[i] : 7, (int)rdPY[i], 255);
+            }
+        } else {                                         // jam: static ramps up
+            int jx = (esp_random() % 3) - 1;
+            rdBrow(r, jx, false); rdEyes(r, jx, false, jx); rdMouth(r, 0, false);
+            rdNoise(r, fPT < 40 ? fPT : 40, rdFaceH);
         }
         if (fPT >= fWin) {
-            if      (fType <= 1) fOk = fSide == (fType == 0 ? 1 : 2);
-            else if (fType == 2) fOk = fDial == fFreq;
-            else                 fOk = fOver;
-            if (fOk && fType == 2) fVuln = 43;   // clean beam block opens the window
-            if (!fOk) { fHull -= (fType == 2 ? 2 : fType == 3 ? 3 : 1); }
+            if (fType == T_ACID) {                       // lands on a random deck
+                fAcid = esp_random() % 4; fAcidHP = 6; fOk = true; fEvent("acid");
+            } else if (fType == T_JAM) {                 // never the medic — they fix it
+                fJam = esp_random() % 3; fResync = esp_random() % 4;
+                fOk = true; fEvent("jam");
+            } else {
+                if      (fType <= T_SWEEP_R) fOk = fSide == (fType == T_SWEEP_L ? 1 : 2);
+                else if (fType == T_BEAM)    fOk = fDial == fFreq;
+                else                         fOk = fOver;
+                if (fOk) {
+                    fStats.blk++;
+                    if (fType == T_BEAM) { fVuln = SEC(3); fEvent("vuln"); }
+                    else fEvent("block");
+                } else {
+                    fStats.miss++;
+                    hullHit(fType == T_BEAM ? 2 : fType == T_CHARGE ? 3 : 1);
+                    fEvent("bosshit");
+                    if (fState != ST_FIGHT) return;
+                }
+            }
             fPhase = F_RESOLVE; fPT = 0;
         }
         break;
     }
     case F_RESOLVE:
         if (fOk) { rdBrow(r, 0, false); rdEyes(r, 0, false, 0); rdMouth(r, fVuln ? 2 : 0, false); }
-        else if (fPT & 1)                        // hit: whole face flashes
+        else if (fPT & 1)                                // hit: whole face flashes
             for (int y = 0; y < rdFaceH; y++) for (int x = 0; x < rdW; x++) r.setPixel(x, y, 255);
-        if (fPT >= 8) { fPhase = F_GAP; fPT = 0; fGapT = 40 + esp_random() % 40; }
+        if (fPT >= 8) { fPhase = F_GAP; fPT = 0; fGapT = rollGap(); }
         break;
-    case F_WIN:                                  // the melt, then back to showcase
-        for (int x = 0; x < rdW && x < 16; x++)
-            if ((esp_random() % 5) == 0 && rdMelt[x] < rdH) rdMelt[x]++;
-        for (int x = 5; x <= 10; x++) { int cy = 12 + rdMelt[x]; if (cy < rdH) r.setPixel(x, cy, 200); }
-        for (int e = 0; e < 2; e++) { int bx = e ? 10 : 3;
-            for (int y = 3; y <= 5; y++) for (int x = 0; x < 3; x++) {
-                int cy = y + rdMelt[bx + x];
-                if (cy < rdH && !(y == 4 && x == 1)) r.setPixel(bx + x, cy, 200); } }
-        if (fPT > 80) { fOn = false; rdReset(0); }
-        return;                                  // no bars over the death
-    case F_LOSE:
-        if (fPT < 30) { rdMouth(r, 0, true); rdBrow(r, 0, true); rdEyes(r, 0, false, (fPT & 4) ? 1 : -1); rdNoise(r, 8, rdFaceH); }
-        if (fPT > 40) { fOn = false; rdReset(0); }
-        return;
+    case F_TAUNT:                                        // phase-gate interstitial (§9)
+        rdBrow(r, 0, true); rdEyes(r, 0, false, (fPT & 4) ? 1 : -1);
+        rdMouth(r, 0, true);
+        rdNoise(r, 5, rdFaceH);
+        if (fPT >= SEC(2)) { fPhase = F_GAP; fPT = 0; fGapT = rollGap(); }
+        break;
+    }
+
+    // P3 lane shot rendered as a projectile descending the target's stage lane.
+    if (fLane >= 0 && rdStageY >= 0) {
+        int total = SEC(2);
+        int y = rdStageY + (int)((uint32_t)(total - fLaneT) * (rdH - 1 - rdStageY) / total);
+        r.setPixel(2 + fLane * 4, y, (rdT & 2) ? 255 : 90);
     }
     fightDrawBars(r);
+}
+
+static void statsTick(Renderer& r) {
+    // The decks carry the numbers; the panel shows the verdict.
+    bool win = fStats.res && strcmp(fStats.res, "win") == 0;
+    const char* v = win ? "GG" : "KO";
+    int x0 = (rdW - 11) / 2, y0 = (rdFaceH - 7) / 2;
+    r.drawChar(x0,     y0, v[0], win ? 255 : 200);
+    r.drawChar(x0 + 6, y0, v[1], win ? 255 : 200);
+    rdStage(r, (fHull * 8 + 9) / 10, false);
+}
+
+// The device→deck snapshot (~10 Hz via main.cpp / gameNetSnapshot). Idempotent:
+// each field is absolute state, so a deck that missed ticks fully re-syncs on
+// the next one. Decks filter by role — the glyph is only *shown* on the
+// Hacker's deck, the resync key only matters to the Medic reading the
+// Hacker's screen, etc.
+size_t raidNet(char* buf, size_t cap) {
+    if (fState == ST_IDLE) return 0;                     // showcase: no net traffic
+    static const char* SN[] = { "idle", "lobby", "intro", "fight", "win", "lose", "stats" };
+    bool beamLive = fState == ST_FIGHT && fPhase == F_TELE && fType == T_BEAM && fParty >= 2;
+    int n = snprintf(buf, cap,
+        "{\"type\":\"raid\",\"st\":\"%s\",\"party\":%u,\"mood\":\"%s\",\"ph\":%u,"
+        "\"hp\":%d,\"hull\":%d,\"vulnMs\":%u,\"enrage\":%d,"
+        "\"crank\":%u,\"shells\":%u,\"glyph\":%d,\"code\":[%u,%u,%u,%u],"
+        "\"acid\":%d,\"acidHp\":%u,\"jam\":%d,\"rsy\":%d,\"lane\":%d,\"laneMs\":%u,"
+        "\"ev\":%lu,\"evn\":\"%s\"",
+        SN[fState], fParty, MOODS[fMood].name, fPhaseNo,
+        (int)fHP, (int)fHull, (unsigned)(fVuln * RD_TICKMS),
+        fEnrage < 0 ? -1 : (int)(fEnrage * RD_TICKMS / 1000),
+        fCrank, fShells, beamLive ? (int)fGlyph : -1,
+        fCode[0], fCode[1], fCode[2], fCode[3],
+        (int)fAcid, fAcidHP, (int)fJam, fJam >= 0 ? (int)fResync : -1,
+        (int)fLane, (unsigned)(fLane >= 0 ? fLaneT * RD_TICKMS : 0),
+        (unsigned long)fEv, fEvName);
+    if (n < 0 || (size_t)n >= cap) return 0;
+    if (fState >= ST_WIN) {
+        int m = snprintf(buf + n, cap - n,
+            ",\"stats\":{\"res\":\"%s\",\"sec\":%u,\"blk\":%u,\"miss\":%u,"
+            "\"dmg\":%u,\"vdmg\":%u,\"shots\":%u,\"itr\":%u,\"wip\":%u,\"fix\":%u,"
+            "\"hullLost\":%u}",
+            fStats.res, (unsigned)(fStats.t * RD_TICKMS / 1000),
+            fStats.blk, fStats.miss, fStats.dmg, fStats.vdmg,
+            fStats.shots, fStats.itr, fStats.wip, fStats.fix, fStats.hullLost);
+        if (m < 0 || (size_t)(n + m) >= cap) return 0;
+        n += m;
+    }
+    if ((size_t)(n + 1) >= cap) return 0;
+    buf[n++] = '}'; buf[n] = 0;
+    return (size_t)n;
 }
 
 bool raidTick(Renderer& r, uint32_t now) {
     if (now - rdLast < RD_TICKMS) return false;
     rdLast = now;
     rdT++;
-    if (fOn) { r.clear(); fightTick(r); return true; }
-    if (rdAuto && rdT > 85) rdReset(rdAnimIdx + 1);
 
+    if (fState != ST_IDLE) {
+        r.clear();
+        switch (fState) {
+        case ST_LOBBY: lobbyTick(r); break;
+        case ST_INTRO: introTick(r); break;
+        case ST_FIGHT: fightTick(r); break;
+        case ST_WIN:                                     // the classic row-by-row melt
+            fPT++;
+            for (int x = 0; x < rdW && x < 16; x++)
+                if ((esp_random() % 5) == 0 && rdMelt[x] < rdH) rdMelt[x]++;
+            for (int x = 5; x <= 10; x++) { int cy = 12 + rdMelt[x]; if (cy < rdH) r.setPixel(x, cy, 200); }
+            for (int e = 0; e < 2; e++) { int bx = e ? 10 : 3;
+                for (int y = 3; y <= 5; y++) for (int x = 0; x < 3; x++) {
+                    int cy = y + rdMelt[bx + x];
+                    if (cy < rdH && !(y == 4 && x == 1)) r.setPixel(bx + x, cy, 200); } }
+            if (fPT > 80) { fState = ST_STATS; fPT = 0; fEvent("stats"); }
+            break;
+        case ST_LOSE:                                    // the grin, then snap to black
+            fPT++;
+            if (fPT < 30) { rdMouth(r, 0, true); rdBrow(r, 0, true);
+                rdEyes(r, 0, false, (fPT & 4) ? 1 : -1); rdNoise(r, 8, rdFaceH); }
+            if (fPT > 40) { fState = ST_STATS; fPT = 0; fEvent("stats"); }
+            break;
+        case ST_STATS: statsTick(r); break;
+        default: break;
+        }
+        return true;
+    }
+
+    if (rdAuto && rdT > 85) rdReset(rdAnimIdx + 1);
     r.clear();
     switch (rdBoss) {
         case VANTA:   tickVanta(r);   break;
