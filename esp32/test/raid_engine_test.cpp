@@ -284,6 +284,67 @@ static void testAssistGovernor() {
     leaveFight();
 }
 
+// 6. Duds come from SLOPPY forges only (§6 D4). A clean trace must never dud
+//    at any difficulty, and no trace duds below NIGHTMARE.
+static void testSloppyForgeDuds() {
+    Renderer& r = *makeCanvas(2);
+    R = &r;
+    raidInit(r);
+
+    // Send `n` shells with the given send-key and fire each one; count duds.
+    auto runShells = [&](uint8_t diff, char sendKey, int n) {
+        startFight('V', 2, diff);          // party 2 -> the shell pipeline is live
+        int duds = 0;
+        for (int i = 0; i < n && fState == ST_FIGHT; i++) {
+            fEvName[0] = 0;
+            raidInput(3, sendKey, true);   // medic forges + sends
+            for (int k = 0; k < 12; k++) raidInput(1, 'K', true);   // crank to 100
+            fEvName[0] = 0;
+            raidInput(1, 'F', true);       // gunner fires
+            if (strcmp(fEvName, "dud") == 0) duds++;
+            g_millis += RD_TICKMS; raidTick(r, g_millis); heartbeatAll();
+        }
+        leaveFight();
+        return duds;
+    };
+
+    check(runShells(3, 'T', 200) == 0, "NIGHTMARE: a clean forge never duds");
+    check(runShells(3, 't', 200) > 0,  "NIGHTMARE: a sloppy forge sometimes duds");
+    check(runShells(1, 't', 200) == 0, "FIELD: even a sloppy forge never duds");
+    check(runShells(0, 't', 200) == 0, "DRILL: even a sloppy forge never duds");
+}
+
+// 7. BASH displaces deck controls only at D4 (§3.4), and they settle back.
+static void testBashRemap() {
+    Renderer& r = *makeCanvas(2);
+    R = &r;
+    raidInit(r);
+
+    // Force a BASH telegraph to resolve and report the remap the decks get.
+    auto bashAt = [&](uint8_t diff) {
+        startFight('B', 4, diff);          // BULWARK owns BASH
+        fPhase = F_TELE; fType = T_BASH; fWin = rollWin(T_BASH); fPT = 0;
+        for (int t = 0; t < 200 && fPhase == F_TELE; t++) {
+            g_millis += RD_TICKMS; raidTick(r, g_millis); heartbeatAll();
+        }
+        return fBashRemap;
+    };
+
+    check(bashAt(1) == 0, "FIELD: bash is cosmetic, no control displacement");
+    leaveFight();
+    uint8_t id = bashAt(3);
+    check(id >= 1 && id <= 3, "NIGHTMARE: bash displaces controls (remap id 1-3)");
+    // …and it wears off with the shudder rather than sticking.
+    for (int t = 0; t < 200 && fBash; t++) {
+        g_millis += RD_TICKMS; raidTick(r, g_millis); heartbeatAll();
+    }
+    check(fBashRemap == 0, "controls settle back when the bash ends");
+    leaveFight();
+    startFight('B', 4, 3);
+    check(fBashRemap == 0, "a fresh fight starts with controls undisplaced");
+    leaveFight();
+}
+
 int main() {
     printf("raid engine — invariant sweep\n");
     testSweep(1);                           // 16x16: no stage row (decks carry the bars)
@@ -296,6 +357,10 @@ int main() {
     testDisconnectPause();
     printf("raid engine — assist governor\n");
     testAssistGovernor();
+    printf("raid engine — sloppy-forge duds\n");
+    testSloppyForgeDuds();
+    printf("raid engine — bash control displacement\n");
+    testBashRemap();
 
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all checks passed",
            failures, failures == 1 ? "" : "s");

@@ -429,20 +429,29 @@ WS ~10 KB/s. The cost is still **surface area**, not resources.
 - **M2 — scaling + knob** ✅ *(shipped: the engine is now data-driven per §10
   — bosses are `FBossDef` const tables + shared anatomy programs. SIM LEVEL
   knob D1–D4 with window/cadence/hull/enrage scalars and mechanic gating
-  (DRILL strips feints/afflictions and enrage; NIGHTMARE forges duds — M2
-  simplification: a flat 15% roll at send time, and D4's bash control-remap
-  stays cosmetic). MOTH: feints that dissolve at 60% and punish a committed
-  shield with a 3 s cooldown, the hacker pulse readout (REAL!/FAKE!), and
-  DUST that blanks the decks' lane alerts until wiped or shot clear.
-  BULWARK: armored 1-damage cap, the ping→riposte→visor-lift BAIT loop,
-  ping/heavy forge fork (2-node vs 4-node trace), BASH deck shudder, and
-  MOCKING fake lifts that never uncap. Deck bundles: 2p info/action, 3p
+  (DRILL strips feints/afflictions/enrage/lane fire; NIGHTMARE's sloppy
+  forges dud and its BASH displaces controls — see below). MOTH: feints
+  that dissolve at 60% and punish a committed shield with a 3 s cooldown,
+  the hacker pulse readout (REAL!/FAKE!), and DUST that hides which lane is
+  targeted until wiped or shot clear. BULWARK: armored 1-damage cap, the
+  ping→riposte→visor-lift BAIT loop, ping/heavy forge fork (2-node vs
+  4-node trace), BASH deck shudder, and MOCKING fake lifts that never
+  uncap. Deck bundles: 2p info/action, 3p
   shield/hacker/action, and the functional solo Pilot cockpit with the
   alert diamond driven by a device hint. Disconnect-pause via per-role
   heartbeats — a claimed deck silent >10 s puts the boss visibly to sleep;
   the client remembers its bundle in localStorage. Assist governor: two
   consecutive wipes at D1–D2 grant +2 hull and −10% cadence, announced as
-  ASSISTED on the nameplate.)* *Roster depth begins.*
+  ASSISTED on the nameplate.*
+  *Both D4 mechanics are now real rather than stubbed: **duds** come only
+  from a **sloppy forge** — the Medic's deck grades its own trace (a wrong
+  node, or slower than 2.5 s) and sends a lowercase key variant, so a clean
+  trace is never a dud and the tax falls on panicking, not on dice; and
+  **BASH** at D4 makes the device roll a displacement id that genuinely
+  rearranges every deck (rocker halves swap / dial detents reverse / both)
+  for the shudder. Only the layout moves — each control still sends its
+  true key — so it can't be exploited or desync the device; it costs you
+  the reach you'd made from muscle memory.)* *Roster depth begins.*
 - **M3 — the evening.** CHORUS (triple anatomy, rounds, targeting),
   mutations, gauntlet structure + mod drafts, persistence. *Replayable.*
 - **M4 — the finale + juice.** NULL (all four corruptions, dialect theft,

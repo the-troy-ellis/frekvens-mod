@@ -53,6 +53,15 @@
 @keyframes bash-shake { 0%,100% { transform: translateX(0); }
   25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
 .bashing { animation: bash-shake 0.25s infinite; }
+/* D4 BASH: the controls actually rearrange — flag it so the displacement reads
+   as damage rather than a rendering glitch. */
+.deck.remapped { outline: 1px dashed var(--accent); outline-offset: 4px; }
+.deck.remapped .deck-head::after { content: " · CONTROLS DISPLACED";
+  color: var(--accent); }
+/* forge grade: the Medic's live trace quality (clean traces never dud) */
+.forge-grade { text-align: center; font-size: 10px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: #27b537; }
+.forge-grade.bad { color: var(--accent); font-weight: 700; }
 .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
 .stats-grid .srow { display: flex; justify-content: space-between;
   border-bottom: 1px dashed var(--border); padding: 3px 0; font-size: 12px; }
@@ -171,7 +180,10 @@
   justify-content: center; }
 #capsule { position: absolute; width: 30px; height: 16px; border-radius: 8px;
   background: var(--accent); border: 1px solid var(--accent2); opacity: 0;
-  transition: transform 0.5s cubic-bezier(0.5,0,1,1), opacity 0.1s 0.45s; }
+  transition: transform 0.5s cubic-bezier(0.5,0,1,1), opacity 0.1s 0.45s;
+  /* Pure decoration, and it sits centred right on top of the send button —
+     without this it swallows the tap that fires the shell. */
+  pointer-events: none; }
 #capsule.whoosh { transform: translateY(-70px); opacity: 1; }
 .triage { display: flex; gap: 8px; justify-content: center; }
 .tri-icon { width: 54px; border: 1px solid var(--border); border-radius: 6px;
@@ -380,6 +392,7 @@
       <button class="node" data-n="1">1</button><button class="node" data-n="2">2</button>
       <button class="node" data-n="3">3</button><button class="node" data-n="4">4</button>
     </div>
+    <div class="forge-grade" id="forge-grade" hidden></div>
     <div class="tube-rig"><div id="capsule"></div>
       <button class="btn-primary" id="send-shell" disabled>send to gunner</button></div>
     <div id="resync-rig" hidden>

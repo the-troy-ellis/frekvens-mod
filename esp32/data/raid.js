@@ -244,6 +244,31 @@ $('dodge').onpointerdown = (e) => {
   myRoles.forEach(r => roleKey('X', r));
 };
 
+/* BASH control displacement (§3.4). Below D4 the deck just shudders; at D4 the
+   device sends a remap id and the controls genuinely rearrange for ~2 s:
+     1 = rocker halves swap · 2 = dial detents reverse · 3 = both
+   Only the LAYOUT moves — every control still sends its true key — so this
+   can't be exploited or desync the device. It costs you the reach you'd made
+   from memory, which is exactly the intent: look, don't grab. */
+let bashRemapShown = 0;
+function applyBashRemap(id) {
+  if (id === bashRemapShown) return;
+  bashRemapShown = id;
+  // CSS `order` moves the rendered position without touching the handlers.
+  const swapRocker = (id & 1) !== 0;
+  shlL.style.order = swapRocker ? '2' : '';
+  shlR.style.order = swapRocker ? '1' : '';
+  const revDial = (id & 2) !== 0;
+  document.querySelectorAll('#knob-detents span').forEach(s => {
+    s.style.order = revDial ? String(5 - +s.dataset.f) : '';
+  });
+  document.querySelectorAll('#p-dial .p-key').forEach(b => {
+    b.style.order = revDial ? String(5 - +b.dataset.k) : '';
+  });
+  $('deck-shl').classList.toggle('remapped', id !== 0);
+  $('deck-pil').classList.toggle('remapped', id !== 0);
+}
+
 function cockpitFx(evn) {
   const good = ['block', 'vuln', 'vulnhit', 'interrupt', 'dodge', 'wiped', 'resync',
                 'win', 'visor', 'feint', 'dustclear', 'dustshot'];
@@ -284,6 +309,7 @@ function handleSnap(s) {
   $('visor-tag').hidden = !(s.visor > 0);
   $('dust-tag').hidden = !(s.dust && inFight());
   $('cockpit').classList.toggle('bashing', s.bash > 0);
+  applyBashRemap(s.bashRemap | 0);
 
   /* lobby pickers */
   document.querySelectorAll('#party-strip .segmented-btn').forEach(b =>
@@ -576,30 +602,62 @@ paintCodebook(null);
 
 /* ============ MEDIC — workbench (role 3) ============ */
 /* BULWARK's forge fork (§3.4): a 2-node trace is a PING, the full 4-node
-   trace is a HEAVY. Everyone else forges the full trace for a generic shell. */
-let forgeNext = 1;
+   trace is a HEAVY. Everyone else forges the full trace for a generic shell.
+   The deck GRADES its own trace: a wrong node, or dawdling over it, marks the
+   shell sloppy and it goes out as the lowercase key. At NIGHTMARE the device
+   turns sloppy shells into duds (§6 D4) — a clean trace is always safe, so
+   this is a skill tax on panicking, not a dice roll. */
+const FORGE_CLEAN_MS = 2500;                    // slower than this = fumbled
+let forgeNext = 1, forgeSlips = 0, forgeStart = 0;
 const sendBtn = $('send-shell');
+function forgeSloppy() {
+  return forgeSlips > 0 || (forgeStart && performance.now() - forgeStart > FORGE_CLEAN_MS);
+}
 function paintForge() {
   const fork = isBulwark() && inFight();
   if (forgeNext === 3 && fork) { sendBtn.disabled = false; sendBtn.textContent = 'send PING'; }
   else if (forgeNext === 5)    { sendBtn.disabled = false; sendBtn.textContent = fork ? 'send HEAVY' : 'send shell'; }
   else { sendBtn.disabled = forgeNext !== 3 || !fork; if (sendBtn.disabled) sendBtn.textContent = 'send to gunner'; }
+  // Live grade, so the Medic can feel the tax before they send.
+  const grade = $('forge-grade');
+  const dudsOn = snap && snap.duds && inFight();
+  if (forgeNext === 1) { grade.hidden = true; return; }
+  grade.hidden = false;
+  const bad = forgeSloppy();
+  grade.textContent = bad
+    ? (dudsOn ? 'SLOPPY — may dud' : 'sloppy')
+    : (dudsOn ? 'clean — safe' : 'clean');
+  grade.className = 'forge-grade' + (bad ? ' bad' : '');
 }
 document.querySelectorAll('.node:not(.rsy)').forEach(n => {
   n.onpointerdown = (e) => {
     e.preventDefault();
-    if (+n.dataset.n === forgeNext) { n.classList.add('lit'); forgeNext++; }
-    else { document.querySelectorAll('.node:not(.rsy)').forEach(x => x.classList.remove('lit')); forgeNext = 1; }
+    if (+n.dataset.n === forgeNext) {
+      if (!forgeStart) forgeStart = performance.now();   // first node of this shell
+      n.classList.add('lit'); forgeNext++;
+    } else {                                     // wrong node — restart the trace
+      document.querySelectorAll('.node:not(.rsy)').forEach(x => x.classList.remove('lit'));
+      forgeNext = 1; forgeSlips++;
+      // forgeStart deliberately keeps running: a fumbled shell stays fumbled
+      // (and the retry eats the clock too). Only sending it clears the grade.
+    }
     paintForge();
   };
 });
-sendBtn.onclick = () => {
-  const ping = forgeNext === 3;                // fork: 2 nodes = ping, 4 = heavy
+function resetForge() {
   document.querySelectorAll('.node:not(.rsy)').forEach(x => x.classList.remove('lit'));
-  forgeNext = 1; sendBtn.disabled = true; sendBtn.textContent = 'send to gunner';
+  forgeNext = 1; forgeSlips = 0; forgeStart = 0;
+  sendBtn.disabled = true; sendBtn.textContent = 'send to gunner';
+  $('forge-grade').hidden = true;
+}
+sendBtn.onclick = () => {
+  const ping   = forgeNext === 3;               // fork: 2 nodes = ping, 4 = heavy
+  const sloppy = forgeSloppy();
+  const k = (ping && isBulwark()) ? 'U' : 'T';
+  resetForge();
   const cap = $('capsule');
   cap.classList.remove('whoosh'); void cap.offsetWidth; cap.classList.add('whoosh');
-  if (inFight()) roleKey(ping && isBulwark() ? 'U' : 'T', 3);
+  if (inFight()) roleKey(sloppy ? k.toLowerCase() : k, 3);
   setTimeout(() => {
     if (!inFight()) shellPing.classList.add('loaded');
     cap.classList.remove('whoosh');

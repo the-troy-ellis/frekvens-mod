@@ -706,18 +706,27 @@ static const FBossDef FBOSSES[] = {
 static const uint8_t N_FBOSS = sizeof(FBOSSES) / sizeof(FBOSSES[0]);
 
 // The SIM LEVEL knob (§6), D1-D4. D5 SIGNAL-LOST ships with M4. enrageS 0 =
-// enrage off. Gates: DRILL drops every signature/afflication for pure
-// alphabet practice; NIGHTMARE's sloppy forges make duds. (M2 simplification:
-// the dud is a flat 15% roll at send time — forge sloppiness isn't measured —
-// and D4's control remap on bash stays cosmetic client-side.)
+// enrage off. Gates: DRILL drops every signature/affliction for pure alphabet
+// practice; NIGHTMARE's sloppy forges make duds and its BASH remaps controls.
+//   duds  — a *sloppy* forge can produce a dud shell (§6 D4). The Medic's deck
+//           grades its own trace and sends the lowercase key variant when it
+//           was fumbled; a clean trace never duds, so care is always rewarded.
+//   remap — BASH briefly displaces every deck's controls (§3.4). Cosmetic
+//           below D4; at D4 the deck genuinely rearranges its controls, so
+//           muscle memory misfires and you have to read the labels.
 struct DiffDef { const char* name; float win, cad; int8_t hull; uint8_t enrageS;
-                 bool feints, afflict, duds; };
+                 bool feints, afflict, duds, remap; };
 static const DiffDef DIFFS[4] = {
-    { "DRILL",     1.50f, 0.70f, 12,  0, false, false, false },
-    { "FIELD",     1.00f, 1.00f, 10, 90, true,  true,  false },
-    { "VETERAN",   0.85f, 1.15f, 10, 90, true,  true,  false },
-    { "NIGHTMARE", 0.70f, 1.30f,  8, 75, true,  true,  true  },
+    { "DRILL",     1.50f, 0.70f, 12,  0, false, false, false, false },
+    { "FIELD",     1.00f, 1.00f, 10, 90, true,  true,  false, false },
+    { "VETERAN",   0.85f, 1.15f, 10, 90, true,  true,  false, false },
+    { "NIGHTMARE", 0.70f, 1.30f,  8, 75, true,  true,  true,  true  },
 };
+
+// Dud chance for a forge the Medic's deck graded as sloppy. A clean forge is
+// never a dud — "sloppy forges make duds" is the whole rule. M3's CHEAP SHELLS
+// mutation raises this by 15 points.
+static const uint8_t SLOPPY_DUD_PCT = 35;
 
 static const float PARTY_CAD[5] = { 1.0f, 0.5f, 0.65f, 0.8f, 1.0f };
 
@@ -740,6 +749,12 @@ static bool     fDudGen, fDudPing, fDudHeavy;      // D4 sloppy-forge duds
 static uint16_t fVuln; static int16_t fEnrage;     // enrage <0 = not armed
 static int16_t  fVisor; static bool fFakeLift;     // BULWARK: lift ticks left
 static uint16_t fBash;                             // BULWARK: shudder ticks left
+// Which control displacement this bash inflicts (§3.4), decided here so every
+// deck displaces identically and a client can't opt out: 0 none (below D4),
+// 1 rocker halves swap, 2 dial detents reverse, 3 both. The deck only moves
+// the controls — each one still sends its true key — so nothing is cheatable,
+// you simply have to look instead of reaching from memory.
+static uint8_t  fBashRemap;
 static bool     fFeint; static uint8_t fFeintFx;   // MOTH: current tele is fake
 static uint16_t fShlCd;                            // shield cooldown (feint punish)
 static uint8_t  fDust;                             // MOTH: wipe strokes to clear
@@ -959,7 +974,8 @@ static void fightBegin() {
     fDudGen = fDudPing = fDudHeavy = false;
     if (fParty >= 2) { if (FB.armored) fPing = 1; else fShells = 1; }   // one pre-load
     fVuln = 0; fEnrage = -1; fVisor = 0; fFakeLift = false;
-    fBash = 0; fFeint = false; fFeintFx = 0; fShlCd = 0; fDust = 0;
+    fBash = 0; fBashRemap = 0;
+    fFeint = false; fFeintFx = 0; fShlCd = 0; fDust = 0;
     fFxShot = 0;
     fAcid = -1; fAcidHP = 0; fJam = -1;
     fLane = -1; fLaneT = 0; fLaneGap = 0;   // must reset: these are file-static and
@@ -1024,16 +1040,20 @@ static bool fightInput(uint8_t p, char k) {
             return true;
         case 'F': if (!roleDown(R_GUNNER)) fireShot(); return true;
         case 'P': if (!roleDown(R_GUNNER)) firePing(); return true;
-        case 'T':                                  // medic sends heavy / generic
+        // Shell delivery. Uppercase = the Medic's deck graded the trace clean,
+        // lowercase = fumbled it (a wrong node, or too slow under pressure).
+        // Only a sloppy trace can dud, and only at a difficulty that has duds.
+        case 'T': case 't':                        // medic sends heavy / generic
             if (fParty >= 2 && !roleDown(R_MEDIC)) {
-                bool dud = DD.duds && (esp_random() % 100) < 15;
+                bool dud = DD.duds && k == 't' && (esp_random() % 100) < SLOPPY_DUD_PCT;
                 if (FB.armored) { if (!fHeavy) { fHeavy = 1; fDudHeavy = dud; fEvent("shell"); } }
                 else if (fShells < 2) { fShells++; if (dud) fDudGen = true; fEvent("shell"); }
             }
             return true;
-        case 'U':                                  // medic sends a ping (BULWARK)
+        case 'U': case 'u':                        // medic sends a ping (BULWARK)
             if (fParty >= 2 && !roleDown(R_MEDIC) && FB.armored && !fPing) {
-                fPing = 1; fDudPing = DD.duds && (esp_random() % 100) < 15;
+                fPing = 1;
+                fDudPing = DD.duds && k == 'u' && (esp_random() % 100) < SLOPPY_DUD_PCT;
                 fEvent("shell");
             }
             return true;
@@ -1253,7 +1273,7 @@ static void fightTick(Renderer& r) {
     fPT++; fStats.t++;
     if (fVuln) fVuln--;
     if (fVisor > 0 && --fVisor == 0) fFakeLift = false;
-    if (fBash) fBash--;
+    if (fBash && --fBash == 0) fBashRemap = 0;   // controls settle back
     if (fShlCd) fShlCd--;
     if (fFeintFx) fFeintFx--;
     fSinceBeam++;
@@ -1321,7 +1341,10 @@ static void fightTick(Renderer& r) {
             } else if (fType == T_DUST) {
                 fDust = 6; fOk = true; fEvent("dust");
             } else if (fType == T_BASH) {
-                fBash = SEC(2); fOk = true; fEvent("bash");
+                fBash = SEC(2); fOk = true;
+                // D4+: the impact actually rearranges the decks for ~2 s.
+                fBashRemap = DD.remap ? (uint8_t)(1 + esp_random() % 3) : 0;
+                fEvent("bash");
             } else if (fType == T_RIP) {
                 fOk = fSide == fRipSide;
                 if (fOk) {
@@ -1419,7 +1442,8 @@ size_t raidNet(char* buf, size_t cap) {
         "\"crank\":%u,\"shells\":%u,\"ping\":%u,\"heavy\":%u,"
         "\"glyph\":%d,\"code\":[%u,%u,%u,%u],\"pulse\":%d,"
         "\"acid\":%d,\"acidHp\":%u,\"jam\":%d,\"rsy\":%d,"
-        "\"lane\":%d,\"laneUp\":%d,\"laneMs\":%u,\"dust\":%d,\"bash\":%u,\"visor\":%u,\"shlCd\":%u,"
+        "\"lane\":%d,\"laneUp\":%d,\"laneMs\":%u,\"dust\":%d,"
+        "\"bash\":%u,\"bashRemap\":%u,\"visor\":%u,\"shlCd\":%u,\"duds\":%d,"
         "\"hint\":%d,\"paused\":%d,\"ev\":%lu,\"evn\":\"%s\"",
         SN[fState], FB.name, DD.name,
         fParty, MD.name, fAssist ? 1 : 0, fPhaseNo,
@@ -1438,9 +1462,11 @@ size_t raidNet(char* buf, size_t cap) {
         // unavoidable hull hit, which the spec never asked for.
         fDust > 0 ? -1 : (int)fLane, fLane >= 0 ? 1 : 0,
         (unsigned)((fLane >= 0 && !fDust) ? fLaneT * RD_TICKMS : 0),
-        fDust > 0 ? 1 : 0, (unsigned)(fBash * RD_TICKMS),
+        fDust > 0 ? 1 : 0,
+        (unsigned)(fBash * RD_TICKMS), fBashRemap,
         (unsigned)(fVisor > 0 ? fVisor * RD_TICKMS : 0),
         (unsigned)(fShlCd * RD_TICKMS),
+        DD.duds ? 1 : 0,          // deck warns the Medic that sloppy traces dud
         hint, (int)fPausedRole,
         (unsigned long)fEv, fEvName);
     if (n < 0 || (size_t)n >= cap) return 0;
