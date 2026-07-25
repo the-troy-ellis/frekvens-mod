@@ -236,7 +236,12 @@ function paintPhase(ph) {
 paintHull(10, 10);
 $('dodge').onpointerdown = (e) => {
   e.preventDefault();
-  if (snap && snap.lane >= 0) roleKey('X', snap.lane);
+  if (!snap) return;
+  if (snap.lane >= 0) { roleKey('X', snap.lane); return; }
+  // Dust: the device withholds WHICH lane. Fire a dodge for each role this
+  // deck owns — the device only honours the real target, so the team still
+  // has to read the buried stage markers to know who acts.
+  myRoles.forEach(r => roleKey('X', r));
 };
 
 function cockpitFx(evn) {
@@ -296,7 +301,11 @@ function handleSnap(s) {
   if (myRoles.includes(s.jam))  alerts.push('JAMMED — medic re-sync!');
   $('deck-alert').hidden = alerts.length === 0;
   $('deck-alert').textContent = alerts.join('  ·  ');
-  $('dodge').hidden = !(s.lane >= 0 && myRoles.includes(s.lane));
+  // Normal: only the targeted deck sees DODGE. Under dust the lane is hidden,
+  // so every deck gets the button and the panel decides who's actually right.
+  const dodgeHidden = s.dust ? !s.laneUp : !(s.lane >= 0 && myRoles.includes(s.lane));
+  $('dodge').hidden = dodgeHidden;
+  $('dodge').textContent = s.dust ? 'DODGE — WHOSE LANE?' : 'DODGE!';
   $('shl-cd-alert').hidden = !(s.shlCd > 0 && myRoles.includes(0));
 
   /* gunner: breach + crank reconcile (the device is the truth) */

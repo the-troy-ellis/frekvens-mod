@@ -19,24 +19,34 @@ Renderer::Renderer(uint16_t w, uint16_t h, const PanelPlacement* layout, uint8_t
         else        _layout[i] = { 0, (int16_t)(i * PANEL_HEIGHT), 0 };   // legacy vertical stack
     }
     _canvas = (uint8_t*)calloc((size_t)_w * _h, 1);
+    // A failed canvas alloc used to hard-fault on the first setPixel/clear.
+    // The renderer is re-created on every config change, so a fragmented heap
+    // (WiFi/TLS buffers) can fail a full-size canvas even though boot succeeded.
+    // Fall back to a single panel — degraded, but alive and re-configurable.
+    if (!_canvas) {
+        _w = PANEL_WIDTH; _h = PANEL_HEIGHT;
+        _canvas = (uint8_t*)calloc((size_t)_w * _h, 1);
+    }
 }
 
 Renderer::~Renderer() {
     free(_canvas);
 }
 
+// _canvas can only be null if even the 16x16 fallback alloc failed (the device
+// is out of heap entirely); guard rather than fault so the web UI stays up.
 void Renderer::setPixel(int x, int y, uint8_t brightness) {
-    if (x < 0 || x >= _w || y < 0 || y >= _h) return;
+    if (!_canvas || x < 0 || x >= _w || y < 0 || y >= _h) return;
     _canvas[(size_t)y * _w + x] = brightness;
 }
 
 uint8_t Renderer::getPixel(int x, int y) const {
-    if (x < 0 || x >= _w || y < 0 || y >= _h) return 0;
+    if (!_canvas || x < 0 || x >= _w || y < 0 || y >= _h) return 0;
     return _canvas[(size_t)y * _w + x];
 }
 
 void Renderer::clear() {
-    memset(_canvas, 0, (size_t)_w * _h);
+    if (_canvas) memset(_canvas, 0, (size_t)_w * _h);
 }
 
 // --- Text rendering ---
@@ -122,7 +132,7 @@ void Renderer::buildFrameForPanel(uint8_t panelIdx, uint8_t* out) const {
 }
 
 void Renderer::blitPanelZone(uint8_t panelIdx, const uint8_t* zoneBuf16x16) {
-    if (panelIdx >= MAX_PANELS) return;
+    if (panelIdx >= MAX_PANELS || !zoneBuf16x16) return;   // zone canvas alloc failed
     const PanelPlacement& pl = _layout[panelIdx];
     // Identical rotation mapping to buildFrameForPanel's sampling switch above —
     // this is deliberately the same math, not just similar: blit-then-sample

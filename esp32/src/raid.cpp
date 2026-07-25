@@ -452,7 +452,8 @@ static void tickBulwark(Renderer& r) {
     }
     case 2: {                                    // VISOR LIFT — the window
         int lift = rdT < 24 ? rdT / 3 : (rdT > 60 ? (72 - rdT) / 2 : 8);
-        if (lift < 0) lift = 0; if (lift > 8) lift = 8;
+        if (lift < 0) lift = 0;
+        if (lift > 8) lift = 8;
         rdBrow(r, 0, false); rdEyes(r, 0, false, 0); rdMouth(r, 1, false);
         visor(r, lift * 2);
         if (lift >= 8 && (rdT & 2)) {            // vulnerable pulse
@@ -500,7 +501,7 @@ static void tickBulwark(Renderer& r) {
             rdBrow(r, 0, false); rdEyes(r, 0, false, 0); rdMouth(r, 2, false);
             for (int y = 0; y < rdFaceH; y++)
                 for (int x = 0; x < rdW; x++)
-                    if (x < c || x >= rdW - c || (esp_random() % 10) < c)
+                    if (x < c || x >= rdW - c || (int)(esp_random() % 10) < c)
                         r.setPixel(x, y, 0);
         }
         if (rdT > 75) rdReset(rdAuto ? 0 : rdAnimIdx);
@@ -773,11 +774,19 @@ static struct {
 static bool fightActive() { return fState != ST_IDLE; }
 static void fightReset()  { fState = ST_IDLE; }
 
+// One-shot deck feedback. Callers MUST emit the incidental event (hit/bosshit/
+// lanehit) BEFORE calling bossDamage()/hullHit(), because those may in turn
+// emit a phase/win/wipe event that has to be the one the decks actually see —
+// emitting afterwards silently clobbered every "win", "wipe" and "phase".
 static void fEvent(const char* n) {
     fEv++;
     strncpy(fEvName, n, sizeof(fEvName) - 1);
     fEvName[sizeof(fEvName) - 1] = 0;
 }
+
+// Max hull for this fight (difficulty baseline + the assist governor's bonus).
+// The 8-segment stage bar and the deck's LED row both scale to it.
+static int hullMax() { return DIFFS[fDiff].hull + (fAssist ? 2 : 0); }
 
 static bool roleDown(int8_t role) { return fAcid == role || fJam == role; }
 
@@ -846,7 +855,14 @@ static void checkPhase() {
     if (want > fPhaseNo) {
         fPhaseNo = want;
         fPhase = F_TAUNT; fPT = 0;
-        if (fPhaseNo == 3 && DD.enrageS) { fEnrage = SEC(DD.enrageS); fLaneGap = rollLaneGap(); }
+        if (fPhaseNo == 3) {
+            if (DD.enrageS) fEnrage = SEC(DD.enrageS);
+            // Lane fire is an affliction, so DRILL strips it like acid/jam/dust.
+            // Gated explicitly: it used to ride on DD.enrageS, which left
+            // fLaneGap at whatever the PREVIOUS fight had rolled — so whether
+            // DRILL got lane fire depended on leftover state, not difficulty.
+            if (DD.afflict) fLaneGap = rollLaneGap();
+        }
         fEvent("phase");
     }
 }
@@ -887,13 +903,20 @@ static void fireShot() {
     clearDust("dustshot");                          // a live shot clears MOTH's motes
     if (fPhase == F_TELE && fType == T_CHARGE) {    // charge interrupt!
         fStats.itr++; fOk = true; fPhase = F_RESOLVE; fPT = 0;
-        bossDamage(capA(4)); fEvent("interrupt");
+        fEvent("interrupt");
+        bossDamage(capA(4));                       // may supersede with phase/win
         return;
     }
-    if (fVisor > 0 && !fFakeLift) { bossDamage(9); fStats.vdmg += 9; fEvent("vulnhit"); }
-    else if (fFakeLift && fVisor > 0) { bossDamage(1); fEvent("baited"); }
-    else if (fVuln) { int d = capA(9); bossDamage(d); fStats.vdmg += d; fEvent("vulnhit"); }
-    else bossDamage(capA(3)), fEvent("hit");
+    if (fVisor > 0 && !fFakeLift) {                // visor open: uncapped, ×3
+        fEvent("vulnhit"); fStats.vdmg += 9; bossDamage(9);
+    } else if (fFakeLift && fVisor > 0) {          // MOCKING bait: still armored
+        fEvent("baited"); bossDamage(1);
+    } else if (fVuln) {
+        int d = capA(9);
+        fEvent("vulnhit"); fStats.vdmg += d; bossDamage(d);
+    } else {
+        fEvent("hit"); bossDamage(capA(3));
+    }
 }
 
 // Ping ('P', BULWARK only): the deliberate light provoke — fired into a quiet
@@ -918,7 +941,7 @@ static void firePing() {
         fEvent("riposte");
         return;
     }
-    bossDamage(capA(1)); fEvent("hit");
+    fEvent("hit"); bossDamage(capA(1));
 }
 
 static void fightBegin() {
@@ -938,7 +961,10 @@ static void fightBegin() {
     fVuln = 0; fEnrage = -1; fVisor = 0; fFakeLift = false;
     fBash = 0; fFeint = false; fFeintFx = 0; fShlCd = 0; fDust = 0;
     fFxShot = 0;
-    fAcid = -1; fAcidHP = 0; fJam = -1; fLane = -1;
+    fAcid = -1; fAcidHP = 0; fJam = -1;
+    fLane = -1; fLaneT = 0; fLaneGap = 0;   // must reset: these are file-static and
+                                            // a leftover gap would fire lanes in a
+                                            // difficulty that has them disabled
     fLast1 = fLast2 = T_N; fSinceBeam = 0;
     memset(&fStats, 0, sizeof(fStats)); fStats.res = "";
     memset(rdMelt, 0, sizeof(rdMelt));
@@ -1208,7 +1234,7 @@ static void fightDrawBars(Renderer& r) {
     bool hot = (fVuln > 0 || (fVisor > 0 && !fFakeLift)) && (rdT & 2);
     for (int x = 0; x < lit && x < rdW; x++)
         r.setPixel(x, rdStageY, hot ? 255 : 200);
-    rdStage(r, (fHull * 8 + DD.hull - 1) / DD.hull, fEnrage >= 0 && fEnrage < SEC(20));
+    rdStage(r, (fHull * 8 + hullMax() - 1) / hullMax(), fEnrage >= 0 && fEnrage < SEC(20));
     if (fCrank >= 100 && (rdT & 2)) r.setPixel(rdW - 1, rdH - 1, 255);
 }
 
@@ -1243,7 +1269,7 @@ static void fightTick(Renderer& r) {
             }
         } else if (--fLaneT == 0) {
             fLane = -1; fLaneGap = rollLaneGap();
-            hullHit(1); fEvent("lanehit");
+            fEvent("lanehit"); hullHit(1);       // may supersede with "wipe"
             if (fState != ST_FIGHT) return;
         }
     }
@@ -1304,7 +1330,7 @@ static void fightTick(Renderer& r) {
                                 (esp_random() % 100) < MD.sigPct;   // MOCKING bait
                     fVisor = fFakeLift ? SEC(1) : SEC(4);
                     fEvent(fFakeLift ? "visor" : "visor");          // looks identical — that's the point
-                } else { fStats.miss++; hullHit(2); fEvent("bosshit");
+                } else { fStats.miss++; fEvent("bosshit"); hullHit(2);
                          if (fState != ST_FIGHT) return; }
             } else {
                 if      (fType <= T_SWEEP_R) fOk = fSide == (fType == T_SWEEP_L ? 1 : 2);
@@ -1316,8 +1342,8 @@ static void fightTick(Renderer& r) {
                     else fEvent("block");
                 } else {
                     fStats.miss++;
+                    fEvent("bosshit");             // hullHit may supersede with "wipe"
                     hullHit(FB.dmg[fType == T_BEAM ? 1 : fType == T_CHARGE ? 2 : 0]);
-                    fEvent("bosshit");
                     if (fState != ST_FIGHT) return;
                 }
             }
@@ -1367,7 +1393,7 @@ static void statsTick(Renderer& r) {
     int x0 = (rdW - 11) / 2, y0 = (rdFaceH - 7) / 2;
     r.drawChar(x0,     y0, v[0], win ? 255 : 200);
     r.drawChar(x0 + 6, y0, v[1], win ? 255 : 200);
-    rdStage(r, (fHull * 8 + DD.hull - 1) / DD.hull, false);
+    rdStage(r, (fHull * 8 + hullMax() - 1) / hullMax(), false);
 }
 
 // The device→deck snapshot (~10 Hz via main.cpp / gameNetSnapshot). Idempotent
@@ -1393,7 +1419,7 @@ size_t raidNet(char* buf, size_t cap) {
         "\"crank\":%u,\"shells\":%u,\"ping\":%u,\"heavy\":%u,"
         "\"glyph\":%d,\"code\":[%u,%u,%u,%u],\"pulse\":%d,"
         "\"acid\":%d,\"acidHp\":%u,\"jam\":%d,\"rsy\":%d,"
-        "\"lane\":%d,\"laneMs\":%u,\"dust\":%d,\"bash\":%u,\"visor\":%u,\"shlCd\":%u,"
+        "\"lane\":%d,\"laneUp\":%d,\"laneMs\":%u,\"dust\":%d,\"bash\":%u,\"visor\":%u,\"shlCd\":%u,"
         "\"hint\":%d,\"paused\":%d,\"ev\":%lu,\"evn\":\"%s\"",
         SN[fState], FB.name, DD.name,
         fParty, MD.name, fAssist ? 1 : 0, fPhaseNo,
@@ -1405,7 +1431,12 @@ size_t raidNet(char* buf, size_t cap) {
         fCode[0], fCode[1], fCode[2], fCode[3],
         (fFeint && fState == ST_FIGHT && fPhase == F_TELE) ? 1 : 0,
         (int)fAcid, fAcidHP, (int)fJam, fJam >= 0 ? (int)fResync : -1,
-        fDust > 0 ? -1 : (int)fLane,
+        // MOTH's dust hides WHICH lane is targeted, but "laneUp" still says a
+        // shot is inbound — the deck can offer a dodge that the device only
+        // honours from the real target, so the team has to read the buried
+        // stage markers. Suppressing the shot entirely made dust an
+        // unavoidable hull hit, which the spec never asked for.
+        fDust > 0 ? -1 : (int)fLane, fLane >= 0 ? 1 : 0,
         (unsigned)((fLane >= 0 && !fDust) ? fLaneT * RD_TICKMS : 0),
         fDust > 0 ? 1 : 0, (unsigned)(fBash * RD_TICKMS),
         (unsigned)(fVisor > 0 ? fVisor * RD_TICKMS : 0),

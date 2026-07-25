@@ -30,4 +30,11 @@ bool gameTick(Renderer& r, uint32_t nowMs);
 // return its length; 0 = nothing to send / game has no net layer. main.cpp
 // polls this at ~10 Hz while a whole-canvas game is active and broadcasts the
 // result to every WebSocket client.
+//
+// Buffer contract: publishers return 0 when the buffer is too small, which is
+// indistinguishable from "nothing to send" and would silently freeze every
+// deck. Callers must pass at least GAME_NET_BUF bytes. Raid 16's largest
+// snapshot measured across all bosses/moods/difficulties is ~525 bytes — the
+// headroom is deliberate, do not shrink this to "just fits".
+#define GAME_NET_BUF 768
 size_t gameNetSnapshot(char* buf, size_t cap);

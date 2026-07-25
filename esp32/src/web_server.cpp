@@ -674,6 +674,7 @@ void WebUI::broadcastFrame(const uint8_t* pixelData, uint8_t w, uint8_t h) {
     // connects later gets the current picture immediately (frames are only
     // broadcast on canvas changes now, not streamed continuously).
     size_t pixBytes = (size_t)w * h;
+    if (!pixelData) return;                         // canvas alloc failed — nothing to show
     if (pixBytes > sizeof(lastFrame) - 3) return;   // guard against an over-range request
     lastFrame[0] = 0x01; lastFrame[1] = w; lastFrame[2] = h;
     memcpy(lastFrame + 3, pixelData, pixBytes);

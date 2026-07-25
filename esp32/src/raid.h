@@ -19,6 +19,7 @@ class Renderer;
 void raidInit(Renderer& r);
 void raidInput(uint8_t player, char key, bool pressed);
 bool raidTick(Renderer& r, uint32_t nowMs);
-// ~10 Hz device→deck JSON snapshot (see gameNetSnapshot in games.h).
-// Returns 0 while the showcase is idle — no net traffic outside the fight flow.
+// ~10 Hz device→deck JSON snapshot. Returns 0 while the showcase is idle (no
+// net traffic outside the fight flow) and also on a too-small buffer — see the
+// GAME_NET_BUF contract in games.h, which callers must honour.
 size_t raidNet(char* buf, size_t cap);

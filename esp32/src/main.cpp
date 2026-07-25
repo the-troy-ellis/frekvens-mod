@@ -601,7 +601,10 @@ void loop() {
     // over the WS. Only whole-canvas games — a zone-hosted game has no deck UI.
     if (!cfg.zoneModeOn && dispState.cmd == DisplayCmd::Game && now - lastGameNet >= 100) {
         lastGameNet = now;
-        static char netBuf[768];   // static: keeps the loop-task stack small
+        // static: keeps the loop-task stack small. GAME_NET_BUF is the
+        // publisher contract — an undersized buffer makes gameNetSnapshot
+        // return 0, which is indistinguishable from "nothing to send".
+        static char netBuf[GAME_NET_BUF];
         size_t n = gameNetSnapshot(netBuf, sizeof(netBuf));
         if (n) webUI.broadcastText(netBuf, n);
     }

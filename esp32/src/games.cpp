@@ -812,17 +812,17 @@ struct GameDef {
     void (*input)(uint8_t, char, bool);
     bool (*tick)(Renderer&, uint32_t);
     // Optional device→deck snapshot publisher (see gameNetSnapshot in games.h).
-    // Omitted from a row = value-initialized to nullptr = no net layer.
+    // nullptr = this game has no net layer.
     size_t (*net)(char*, size_t);
 };
 
 static const GameDef GAMES[] = {
-    { { "snake",  "Snake",   1 }, snakeInit,  snakeInput,  snakeTick  },
-    { { "pong",   "Pong",    2 }, pongInit,   pongInput,   pongTick   },
-    { { "tetris", "Tetris",   1 }, tetrisInit, tetrisInput, tetrisTick },
-    { { "dino",   "Pip Run",  1 }, dinoInit,   dinoInput,   dinoTick   },
-    { { "flappy", "Flappy Pip", 1 }, flappyInit, flappyInput, flappyTick },
-    { { "raid",   "Raid 16",   4 }, raidInit,   raidInput,   raidTick,  raidNet },
+    { { "snake",  "Snake",      1 }, snakeInit,  snakeInput,  snakeTick,  nullptr },
+    { { "pong",   "Pong",       2 }, pongInit,   pongInput,   pongTick,   nullptr },
+    { { "tetris", "Tetris",     1 }, tetrisInit, tetrisInput, tetrisTick, nullptr },
+    { { "dino",   "Pip Run",    1 }, dinoInit,   dinoInput,   dinoTick,   nullptr },
+    { { "flappy", "Flappy Pip", 1 }, flappyInit, flappyInput, flappyTick, nullptr },
+    { { "raid",   "Raid 16",    4 }, raidInit,   raidInput,   raidTick,   raidNet },
 };
 static const uint8_t NGAMES = sizeof(GAMES) / sizeof(GAMES[0]);
 static int8_t curGame = -1;
