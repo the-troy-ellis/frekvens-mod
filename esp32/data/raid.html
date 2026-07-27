@@ -62,6 +62,27 @@
 .forge-grade { text-align: center; font-size: 10px; letter-spacing: 0.12em;
   text-transform: uppercase; color: #27b537; }
 .forge-grade.bad { color: var(--accent); font-weight: 700; }
+.head-bars { display: flex; flex-direction: column; gap: 3px; }
+.head-bars .head { display: flex; align-items: center; gap: 6px; }
+.head-bars .head-lbl { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-dim); width: 22px; }
+.head-bars .hp-bar { flex: 1; height: 6px; }
+.head-bars .hp-bar > div { height: 100%; width: 100%; background: var(--accent);
+  transition: width 0.15s linear; }
+.head-bars .head.dead .hp-bar { opacity: 0.35; }
+.head-bars .head.dead .head-lbl { text-decoration: line-through; }
+.head-bars .head.aimed .head-lbl { color: var(--accent2); font-weight: 700; }
+.head-bars .head.lead .hp-bar { outline: 1px solid var(--accent2); }
+.round-strip { display: flex; gap: 4px; justify-content: center; font-size: 10px;
+  letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-dim); }
+.round-strip .rd { width: 14px; height: 5px; border-radius: 2px;
+  background: var(--surface); border: 1px solid var(--border); }
+.round-strip .rd.done { background: var(--border); }
+.round-strip .rd.now  { background: var(--accent); border-color: var(--accent2); }
+.round-strip.announcing { color: var(--accent); animation: flick 0.4s infinite; }
+.aim-lbl { text-align: center; font-size: 10px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--text-dim); margin-top: 4px; }
+.aim-lbl b { color: var(--accent2); }
 .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
 .stats-grid .srow { display: flex; justify-content: space-between;
   border-bottom: 1px dashed var(--border); padding: 3px 0; font-size: 12px; }
@@ -246,6 +267,7 @@
       <div class="boss-strip" id="fboss-strip">
         <button class="segmented-btn active" data-b="V">vanta</button>
         <button class="segmented-btn" data-b="M">moth</button>
+        <button class="segmented-btn" data-b="C">chorus</button>
         <button class="segmented-btn" data-b="B">bulwark</button>
       </div>
       <h3>party size</h3>
@@ -287,7 +309,13 @@
       <span class="np-name" id="np-name">VANTA</span>
       <span class="np-epithet" id="np-epithet">the signal titan</span>
     </div>
-    <div class="hp-bar"><div id="hp-fill"></div></div>
+    <div class="hp-bar" id="hp-single"><div id="hp-fill"></div></div>
+    <div class="head-bars" id="head-bars" hidden>
+      <div class="head"><span class="head-lbl">top</span><div class="hp-bar"><div></div></div></div>
+      <div class="head"><span class="head-lbl">mid</span><div class="hp-bar"><div></div></div></div>
+      <div class="head"><span class="head-lbl">bot</span><div class="hp-bar"><div></div></div></div>
+    </div>
+    <div class="round-strip" id="round-strip" hidden></div>
     <div class="cockpit-row">
       <div class="phase-pips" id="phase-pips"><span class="pip on"></span><span class="pip"></span><span class="pip"></span></div>
       <div class="hull-leds" id="hull-leds"></div>
@@ -349,7 +377,10 @@
       <button class="bigbtn" id="gun-l">&#9664;</button>
       <button class="bigbtn" id="gun-r">&#9654;</button>
     </div>
-    <div class="aim-strip"><span class="lamp" id="lampL"></span><span class="lamp on" id="lampM"></span><span class="lamp" id="lampR"></span></div>
+    <div class="aim-strip">
+      <span class="lamp" id="lampL"></span><span class="lamp on" id="lampM"></span><span class="lamp" id="lampR"></span>
+    </div>
+    <div class="aim-lbl" id="aim-lbl" hidden>target: <b id="aim-name">mid</b></div>
     <h3>fire control</h3>
     <div class="fire-rig">
       <div id="fire-cover">swipe to arm</div>
@@ -422,7 +453,7 @@
       </div>
       <div class="quad" id="q-gun"><h4>&#128299; guns</h4>
         <div class="mini-row"><button class="segmented-btn" id="p-crank">CRANK (hold)</button><button class="segmented-btn" id="p-fire">FIRE</button></div>
-        <div class="mini-row"><button class="segmented-btn" id="p-ping" hidden>PING</button></div>
+        <div class="mini-row"><button class="segmented-btn" id="p-ping" hidden>PING</button><button class="segmented-btn" id="p-aim">AIM ▸</button></div>
         <div class="mini-glyph" id="p-crank-pct">0%</div>
       </div>
       <div class="quad" id="q-hck"><h4>&#128225; signal</h4>

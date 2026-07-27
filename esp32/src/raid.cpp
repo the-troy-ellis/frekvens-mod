@@ -635,15 +635,21 @@ static void tickNull(Renderer& r) {
 // no acid/jam/dust/lanes); 2-4 turns the full deck layers on. Deck bundling
 // for 2-3p lives client-side (raid.js); the device only needs role numbers.
 //
-// Fight keys: L/R rocker · 1-4 dial (lobby: party) · O overcharge · K crank
-// · F fire heavy · P fire ping (Bulwark) · T send heavy/generic shell ·
-// U send ping · W wipe stroke · a-d resync pad · X dodge · H heartbeat ·
-// G advance · Q back. Lobby only: V/M/B pick the boss, D cycles difficulty.
+// Fight keys
+//   Shield  L / R rocker · 1-4 frequency dial · O overcharge
+//   Gunner  K crank +10% · F fire heavy · P fire ping (BULWARK)
+//           y / z aim rocker — picks a HEAD on CHORUS
+//   Medic   T send heavy/generic shell · U send ping (BULWARK)
+//           t / u are the same sends graded SLOPPY by the Medic's own deck
+//           W wipe stroke (acid, then dust) · a-d re-sync pad
+//   Any     X dodge (only the targeted lane counts) · H heartbeat (liveness)
+//           G advance · Q back
+// Lobby only: V/M/C/B pick the boss, 1-4 set party size, D cycles difficulty.
 
 #define SEC(s) ((uint16_t)((s) * 1000 / RD_TICKMS))
 
 enum FState : uint8_t { ST_IDLE, ST_LOBBY, ST_INTRO, ST_FIGHT, ST_WIN, ST_LOSE, ST_STATS };
-enum FPhase : uint8_t { F_GAP, F_TELE, F_RESOLVE, F_TAUNT };
+enum FPhase : uint8_t { F_GAP, F_ANNOUNCE, F_TELE, F_RESOLVE, F_TAUNT };
 enum Tele   : uint8_t { T_SWEEP_L, T_SWEEP_R, T_BEAM, T_CHARGE, T_ACID, T_JAM,
                         T_DUST, T_BASH, T_N,
                         T_RIP = T_N };             // reactive — provoked, never drawn
@@ -652,26 +658,43 @@ enum Role   : int8_t  { R_SHIELD = 0, R_GUNNER = 1, R_HACKER = 2, R_MEDIC = 3 };
 // Mood (§7.2): rolled per fight, announced on the nameplate, readable in the
 // idle stance. dW skews the telegraph deck per type; win/cad scale every
 // window / the attack cadence; sigPct drives the boss's signature roll
-// (MOTH: feint %, BULWARK: fake-lift %).
+// (MOTH: feint %, BULWARK: fake-lift %); lead picks which head opens a CHORUS
+// round (LEAD_TOP / LEAD_BOTTOM / LEAD_ROTATE — ignored by single-head bosses).
+enum { LEAD_TOP = 0, LEAD_BOTTOM = 1, LEAD_ROTATE = 2 };
 struct MoodDef {
     const char* name;
     int8_t  dW[T_N];
     float   winScale, cadScale;
     uint8_t sigPct;
+    uint8_t lead;
 };
 
 // §10: a boss is a const table + one anatomy program. The telegraph engine,
 // window resolution, hull, phases and stats are fully shared.
+//
+// heads > 1 (CHORUS) changes three things and nothing else: `hp` becomes
+// PER-HEAD rather than total, damage lands on the head the Gunner is aiming
+// at, and phases come from kills instead of HP gates (§3.3). Everything
+// downstream — the telegraph deck, windows, hull, stats — is untouched.
 struct FBossDef {
     uint8_t     anatomy;                 // Boss enum — selects the face program
     const char* name;
-    int16_t     hp;
+    int16_t     hp;                      // per head; total = hp * heads
     uint8_t     dmg[3];                  // hull cost on miss: sweep / beam / charge
     uint8_t     gapS[3][2];              // cadence range (s) per phase, FIELD 4p
     uint8_t     teleW[3][T_N];           // draw weights per phase
     MoodDef     moods[3];
     bool        armored;                 // BULWARK: damage capped at 1, visor down
+    uint8_t     heads;                   // 1, or 3 for CHORUS
 };
+#define MAX_HEADS 3
+
+// CHORUS rounds: attacks chain across heads in an announced order, and the
+// blocks have to land in the same order (§3.3). Max chain length by party
+// size (§4 auto-normalization: 2 / 2 / 3 / 3 for 1-4 players).
+static const uint8_t ROUND_MAX[5] = { 2, 2, 2, 3, 3 };
+// Each dead head makes the survivors harmonize: faster, with tighter windows.
+static const float HARM_CAD = 0.25f, HARM_WIN = 0.10f;
 
 static const FBossDef FBOSSES[] = {
     { VANTA, "VANTA", 100, { 1, 2, 3 },
@@ -680,28 +703,40 @@ static const FBossDef FBOSSES[] = {
         {  3,  3, 3,  2, 0, 0, 0, 0 },
         {  2,  2, 3,  2, 2, 2, 0, 0 },
         {  3,  3, 3,  3, 1, 1, 0, 0 } },
-      { { "COLD",    { 0 },                        1.00f, 1.0f, 0 },
-        { "CURIOUS", { 0, 0, 2, 0, 0, 0, 0, 0 },  1.15f, 1.0f, 0 },
-        { "STERN",   { 2, 2, 0, 0, 0, 0, 0, 0 },  0.85f, 1.0f, 0 } },
-      false },
+      { { "COLD",    { 0 },                        1.00f, 1.0f, 0, LEAD_TOP },
+        { "CURIOUS", { 0, 0, 2, 0, 0, 0, 0, 0 },  1.15f, 1.0f, 0, LEAD_TOP },
+        { "STERN",   { 2, 2, 0, 0, 0, 0, 0, 0 },  0.85f, 1.0f, 0, LEAD_TOP } },
+      false, 1 },
     { MOTH, "MOTH", 85, { 1, 1, 2 },               // weaker hits, faster cadence
       { { 6, 8 }, { 5, 7 }, { 4, 5 } },
       { {  3,  3, 3,  1, 0, 0, 2, 0 },
         {  2,  2, 3,  2, 1, 1, 2, 0 },
         {  3,  3, 3,  2, 1, 1, 1, 0 } },
-      { { "SKITTISH", { 0 },                       1.00f, 1.0f, 45 },
-        { "FRENZIED", { 0 },                       1.00f, 1.2f, 30 },
-        { "SLY",      { 0, 0, 1, 0, 0, 0, 0, 0 }, 0.90f, 1.0f, 35 } },
-      false },
+      { { "SKITTISH", { 0 },                       1.00f, 1.0f, 45, LEAD_TOP },
+        { "FRENZIED", { 0 },                       1.00f, 1.2f, 30, LEAD_TOP },
+        { "SLY",      { 0, 0, 1, 0, 0, 0, 0, 0 }, 0.90f, 1.0f, 35, LEAD_TOP } },
+      false, 1 },
     { BULWARK, "BULWARK", 70, { 1, 2, 3 },
       { { 8, 10 }, { 6, 8 }, { 5, 7 } },
       { {  3,  3, 1,  2, 0, 0, 0, 2 },
         {  2,  2, 1,  2, 1, 1, 0, 3 },
         {  3,  3, 1,  3, 1, 1, 0, 2 } },
-      { { "PATIENT",  { 0 },                          1.00f, 1.0f, 0 },
-        { "WRATHFUL", { 0, 0, 0, 1, 0, 0, 0, 2 },    0.90f, 1.1f, 0 },
-        { "MOCKING",  { 0 },                          1.00f, 1.0f, 35 } },
-      true },
+      { { "PATIENT",  { 0 },                          1.00f, 1.0f, 0,  LEAD_TOP },
+        { "WRATHFUL", { 0, 0, 0, 1, 0, 0, 0, 2 },    0.90f, 1.1f, 0,  LEAD_TOP },
+        { "MOCKING",  { 0 },                          1.00f, 1.0f, 35, LEAD_TOP } },
+      true, 1 },
+    // THE CHORUS — 3 heads x 35 HP. Phases come from kills, not HP gates, and
+    // every attack arrives as an announced round chained across the heads.
+    { CHORUS, "CHORUS", 35, { 1, 2, 3 },
+      { { 7, 9 }, { 6, 8 }, { 5, 7 } },
+      { //swL swR bm chg ac jm du ba
+        {  3,  3, 3,  2, 0, 0, 0, 0 },
+        {  3,  3, 3,  2, 1, 1, 0, 0 },
+        {  3,  3, 3,  3, 1, 1, 0, 0 } },
+      { { "SOPRANO", { 0, 0, 1, 0, 0, 0, 0, 0 }, 1.00f, 1.15f, 0, LEAD_TOP    },
+        { "BASSO",   { 0, 0, 0, 2, 0, 0, 0, 0 }, 1.00f, 1.00f, 0, LEAD_BOTTOM },
+        { "ROUND",   { 0 },                      0.95f, 1.05f, 0, LEAD_ROTATE } },
+      false, MAX_HEADS },
 };
 static const uint8_t N_FBOSS = sizeof(FBOSSES) / sizeof(FBOSSES[0]);
 
@@ -740,7 +775,15 @@ static uint8_t  fType;                             // active telegraph (may be T
 static uint8_t  fFreq, fGlyph;                     // beam: frequency + hacker glyph
 static uint8_t  fCode[4];                          // codebook: glyph -> frequency 1..4
 static uint8_t  fRipSide;                          // riposte: side to block (1 L / 2 R)
-static int16_t  fHP;  static int8_t fHull;
+static int16_t  fHP;  static int8_t fHull;      // fHP = total across living heads
+// CHORUS: per-head pools, the Gunner's selected target, and the round chain.
+// Single-head bosses use headHP[0] only and never touch the rest.
+static int16_t  fHeadHP[MAX_HEADS];
+static uint8_t  fAim;                           // 0..heads-1, the Gunner's target
+static uint8_t  fLead;                          // head that opens the next round
+static uint8_t  fRound[4], fRoundHead[4];       // queued telegraph types + attacker
+static uint8_t  fRoundN, fRoundIdx;             // chain length / position
+static uint16_t fAnnounce;                      // ticks left on the order arrows
 static uint16_t fPT, fGapT, fWin;
 static uint8_t  fSide, fDial; static bool fOver, fOk;
 static uint8_t  fCrank, fShells;                   // generic breach (VANTA/MOTH)
@@ -805,10 +848,35 @@ static int hullMax() { return DIFFS[fDiff].hull + (fAssist ? 2 : 0); }
 
 static bool roleDown(int8_t role) { return fAcid == role || fJam == role; }
 
+// --- head helpers (trivial for single-head bosses) ---
+static int  bossHpMax()      { return FB.hp * FB.heads; }
+static bool headAlive(uint8_t h) { return h < FB.heads && fHeadHP[h] > 0; }
+static uint8_t headsDead() {
+    uint8_t n = 0;
+    for (uint8_t h = 0; h < FB.heads; h++) if (fHeadHP[h] <= 0) n++;
+    return n;
+}
+// Next living head at or after h, wrapping. Returns h unchanged if none live
+// (only reachable on the tick the last head dies, which ends the fight anyway).
+static uint8_t nextLiveHead(uint8_t h) {
+    for (uint8_t i = 0; i < FB.heads; i++) {
+        uint8_t c = (uint8_t)((h + i) % FB.heads);
+        if (fHeadHP[c] > 0) return c;
+    }
+    return h;
+}
+// Survivors harmonize with every kill: cadence up, windows down (§3.3).
+static float harmCad() { return 1.0f + HARM_CAD * headsDead(); }
+static float harmWin() {
+    float w = 1.0f - HARM_WIN * headsDead();
+    return w < 0.5f ? 0.5f : w;                    // never past unreadable
+}
+
 static uint16_t rollGap() {
     uint16_t lo = SEC(FB.gapS[fPhaseNo - 1][0]), hi = SEC(FB.gapS[fPhaseNo - 1][1]);
     uint16_t g = lo + esp_random() % (uint16_t)(hi - lo + 1);
-    float scale = PARTY_CAD[fParty] / MD.cadScale / DD.cad * (fAssist ? 1.1f : 1.0f);
+    float scale = PARTY_CAD[fParty] / MD.cadScale / DD.cad / harmCad()
+                * (fAssist ? 1.1f : 1.0f);
     return (uint16_t)(g * scale);
 }
 static uint16_t rollWin(uint8_t t) {
@@ -819,7 +887,8 @@ static uint16_t rollWin(uint8_t t) {
     else if (t == T_ACID || t == T_JAM || t == T_DUST) base = SEC(1.5f);   // land anim
     else if (t == T_BASH)   base = SEC(1.2f);
     else                    base = SEC(2.5f);      // sweeps
-    return (uint16_t)(base * MD.winScale * DD.win);
+    uint16_t w = (uint16_t)(base * MD.winScale * DD.win * harmWin());
+    return w < 4 ? 4 : w;                          // keep every window tickable
 }
 static uint16_t rollLaneGap() { return SEC(4) + esp_random() % SEC(2); }
 
@@ -866,7 +935,16 @@ static void toLose() {
 }
 
 static void checkPhase() {
-    uint8_t want = fHP > FB.hp * 2 / 3 ? 1 : (fHP > FB.hp / 3 ? 2 : 3);
+    // Single-head bosses gate on HP thirds; CHORUS's phases emerge from kills
+    // (§3.3) — one dead head IS the phase change, no threshold involved.
+    uint8_t want;
+    if (FB.heads > 1) {
+        want = (uint8_t)(1 + headsDead());
+        if (want > 3) want = 3;
+    } else {
+        int mx = bossHpMax();
+        want = fHP > mx * 2 / 3 ? 1 : (fHP > mx / 3 ? 2 : 3);
+    }
     if (want > fPhaseNo) {
         fPhaseNo = want;
         fPhase = F_TAUNT; fPT = 0;
@@ -882,11 +960,25 @@ static void checkPhase() {
     }
 }
 
+// Damage lands on the head the Gunner is aiming at (single-head bosses always
+// aim at head 0). fHP is the derived total the panel bar and the decks show.
 static void bossDamage(int d) {
-    fHP -= d;
     fStats.dmg += d;
+    uint8_t h = headAlive(fAim) ? fAim : nextLiveHead(fAim);
+    fHeadHP[h] -= d;
+    bool killed = false;
+    if (fHeadHP[h] <= 0) { fHeadHP[h] = 0; killed = FB.heads > 1; }
+
+    fHP = 0;
+    for (uint8_t i = 0; i < FB.heads; i++) fHP += fHeadHP[i];
     if (fHP <= 0) { fHP = 0; toWin(); return; }
-    checkPhase();
+
+    if (killed) {
+        fEvent("headdown");
+        fAim  = nextLiveHead(fAim);      // the rocker can't sit on a corpse
+        fLead = nextLiveHead(fLead);
+    }
+    checkPhase();                        // for CHORUS this reads the kill count
 }
 
 static void hullHit(int8_t n) {
@@ -897,6 +989,49 @@ static void hullHit(int8_t n) {
 
 static void clearDust(const char* how) {
     if (fDust) { fDust = 0; fEvent(how); }
+}
+
+// Make `type` the live telegraph: roll its window, seed whatever the animation
+// needs, clear the team's latched responses. Shared by single attacks and by
+// each element of a CHORUS round, so the alphabet behaves identically in both.
+static void armTelegraph(uint8_t type) {
+    fType  = type;
+    fLast2 = fLast1; fLast1 = type;
+    fFeint = false;
+    if (type == T_BEAM) {
+        fSinceBeam = 0;
+        if (fParty >= 2) { fGlyph = esp_random() % 4; fFreq = fCode[fGlyph]; }
+        else             { fFreq = 1 + esp_random() % 4; }
+    }
+    if ((type <= T_SWEEP_R || type == T_BEAM) && DD.feints &&
+        MD.sigPct && !FB.armored)                     // MOTH: roll the feint
+        fFeint = (esp_random() % 100) < MD.sigPct;
+    if (type == T_ACID)
+        for (int i = 0; i < 3; i++) { rdPY[i] = 13; rdPX[i] = 6 + esp_random() % 4; }
+    if (type == T_DUST)
+        for (int i = 0; i < 6; i++) { rdPY[i] = 2 + i; rdPX[i] = esp_random() % rdW; }
+    fWin  = rollWin(type);
+    fSide = 0; fOver = false;
+}
+
+// CHORUS: draw the chain and hand each attack to a head, starting at the lead
+// and passing to the next survivor (§3.3). Party size caps the length so a
+// solo pilot is never asked to queue three blocks.
+static void buildRound() {
+    uint8_t maxN = ROUND_MAX[fParty <= 4 ? fParty : 4];
+    uint8_t alive = (uint8_t)(FB.heads - headsDead());
+    if (maxN > alive) maxN = alive;                   // a dead head can't attack
+    if (maxN < 1) maxN = 1;
+    fRoundN   = (uint8_t)(1 + esp_random() % maxN);
+    fRoundIdx = 0;
+    if (MD.lead == LEAD_ROTATE) fLead = nextLiveHead((uint8_t)(fLead + 1));
+    else                        fLead = nextLiveHead(fLead);
+    uint8_t h = fLead;
+    for (uint8_t i = 0; i < fRoundN; i++) {
+        fRound[i]     = drawTele();
+        fRoundHead[i] = h;
+        h = nextLiveHead((uint8_t)(h + 1));
+    }
 }
 
 // Heavy / generic shot ('F'): crank to 100, and at 2p+ the breach must hold a
@@ -967,7 +1102,12 @@ static void fightBegin() {
         uint8_t t = fCode[i]; fCode[i] = fCode[j]; fCode[j] = t;
     }
     fAssist = fDiff <= 1 && fWipeStreak[fBoss] >= 2;     // the governor (§6)
-    fHP = FB.hp; fHull = DD.hull + (fAssist ? 2 : 0);
+    for (uint8_t h = 0; h < MAX_HEADS; h++) fHeadHP[h] = h < FB.heads ? FB.hp : 0;
+    fHP = bossHpMax();
+    fAim = 0;
+    fLead = MD.lead == LEAD_BOTTOM ? (uint8_t)(FB.heads - 1) : 0;
+    fRoundN = fRoundIdx = 0; fAnnounce = 0;
+    fHull = DD.hull + (fAssist ? 2 : 0);
     fPhaseNo = 1; fPhase = F_GAP;
     fSide = 0; fDial = 0; fOver = false; fOk = false;
     fCrank = 0; fShells = 0; fPing = 0; fHeavy = 0;
@@ -1013,6 +1153,7 @@ static bool fightInput(uint8_t p, char k) {
         if (k == 'V') { fBoss = 0; return true; }
         if (k == 'M') { fBoss = 1; return true; }
         if (k == 'B') { fBoss = 2; return true; }
+        if (k == 'C') { fBoss = 3; return true; }
         if (k == 'D') { fDiff = (fDiff + 1) % 4; return true; }
         if (k == 'G') { fightBegin(); return true; }
         if (k == 'Q') { fState = ST_IDLE; rdAuto = true; rdSetBoss(VANTA); return true; }
@@ -1039,6 +1180,13 @@ static bool fightInput(uint8_t p, char k) {
             if (!roleDown(R_GUNNER)) fCrank = fCrank > 90 ? 100 : fCrank + 10;
             return true;
         case 'F': if (!roleDown(R_GUNNER)) fireShot(); return true;
+        case 'y': case 'z':                        // aim rocker: pick a HEAD (§3.3)
+            if (FB.heads > 1 && !roleDown(R_GUNNER)) {
+                uint8_t step = (k == 'z') ? 1 : (uint8_t)(FB.heads - 1);
+                fAim = nextLiveHead((uint8_t)((fAim + step) % FB.heads));
+                fEvent("aim");
+            }
+            return true;
         case 'P': if (!roleDown(R_GUNNER)) firePing(); return true;
         // Shell delivery. Uppercase = the Medic's deck graded the trace clean,
         // lowercase = fumbled it (a wrong node, or too slow under pressure).
@@ -1092,6 +1240,33 @@ static void bulwarkSlats(Renderer& r, int shove, bool slitsLit) {
     for (int x = 10; x <= 12; x++) r.setPixel(x + shove, 4, slitsLit ? 255 : 90);
 }
 
+// CHORUS's three stacked 5-row mini-faces. Dead heads sit hollow and silent;
+// the lead's band edges glow; `active` is the head currently telegraphing.
+// gaze/grin let a band emote without the caller knowing band geometry.
+static void chorusBands(Renderer& r, int8_t active, int gaze, bool grinAll) {
+    for (uint8_t h = 0; h < MAX_HEADS; h++) {
+        bool dead = fHeadHP[h] <= 0;
+        bool lead = !dead && h == fLead;
+        int  ex   = 0;
+        if ((int8_t)h == active) ex = gaze;
+        else if (!dead && !grinAll) ex = ((rdT / 20 + h * 7) % 3) - 1;   // they bicker
+        bandFace(r, h * 5, ex, grinAll, dead, lead);
+    }
+}
+
+// The announced order: arrows tick across the lead band, one pass per queued
+// attack, so the team can read "who, then who" off the panel (§3.3).
+static void chorusArrows(Renderer& r) {
+    if (!fRoundN) return;
+    uint16_t per = fAnnounce / fRoundN ? fAnnounce / fRoundN : 1;
+    uint8_t  i   = (uint8_t)(fPT / per);
+    if (i >= fRoundN) i = (uint8_t)(fRoundN - 1);
+    int by = fRoundHead[i] * 5 + 2;                  // that head's eye row
+    int x  = (int)((fPT % per) * rdW / per);
+    for (int k = 0; k < 3; k++)                      // a short comet, not one dot
+        if (x - k >= 0) r.setPixel(x - k, by, k == 0 ? 255 : 90);
+}
+
 // MOTH's compound eyes forced shut (beam blink code).
 static void mothEyesClosed(Renderer& r) {
     for (int e = 0; e < 2; e++) {
@@ -1108,6 +1283,9 @@ static void faceIdle(Renderer& r, bool asleep) {
     case MOTH:
         mothFace(r, asleep ? 0 : 2, false);
         if (asleep) mothEyesClosed(r);
+        break;
+    case CHORUS:
+        chorusBands(r, -1, 0, false);              // idle: the heads bicker
         break;
     case BULWARK: {
         int shove = fBash ? (((rdT % 4) < 2) ? 1 : -1) : 0;
@@ -1146,6 +1324,7 @@ static void faceTele(Renderer& r) {
         int dir = (fType == T_SWEEP_L || (fType == T_RIP && fRipSide == 1)) ? -1 : 1;
         switch (FB.anatomy) {
         case MOTH:    mothFace(r, 1, true); break;
+        case CHORUS:  chorusBands(r, (int8_t)fRoundHead[fRoundIdx], dir * 2, false); break;
         case BULWARK: bulwarkSlats(r, 0, true);
                       if (fType == T_RIP)          // riposte: the whole slit row flares
                           for (int x = 2; x <= 13; x++) r.setPixel(x, 4, (fPT & 1) ? 255 : 90);
@@ -1163,6 +1342,15 @@ static void faceTele(Renderer& r) {
         bool closed = ph < fFreq * 8 && (ph % 8) < 4;
         switch (FB.anatomy) {
         case MOTH:    mothFace(r, 1, true); if (closed) mothEyesClosed(r); break;
+        case CHORUS: {
+            uint8_t ah = fRoundHead[fRoundIdx];
+            chorusBands(r, (int8_t)ah, 0, false);
+            if (closed)                            // blank that band's eyes = a blink
+                for (int e = 0; e < 2; e++)
+                    for (int y = 1; y <= 2; y++)
+                        for (int x = 0; x < 3; x++) r.setPixel((e ? 10 : 3) + x, ah * 5 + y, 0);
+            break;
+        }
         case BULWARK: bulwarkSlats(r, 0, !closed); break;
         default:      rdBrow(r, 0, true); rdEyes(r, 0, closed, 0);
                       rdMouth(r, 0, false); break;
@@ -1184,6 +1372,13 @@ static void faceTele(Renderer& r) {
             for (int dy = -rr; dy <= rr; dy++)
                 for (int dx = -rr; dx <= rr; dx++)
                     if (dx * dx + dy * dy <= rr * rr) r.setPixel(8 + dx, 8 + dy, 200);
+            break;
+        }
+        case CHORUS: {
+            uint8_t ah = fRoundHead[fRoundIdx];
+            chorusBands(r, (int8_t)ah, 0, false);
+            int by = ah * 5 + 4, hw = 1 + stage;   // its mouth line widens + brightens
+            for (int x = 8 - hw; x <= 7 + hw; x++) r.setPixel(x, by, 255);
             break;
         }
         default: rdBrow(r, 0, true); rdEyes(r, 0, false, 0); rdMouth(r, stage, false); break;
@@ -1250,7 +1445,7 @@ static void introTick(Renderer& r) {
 
 static void fightDrawBars(Renderer& r) {
     if (rdStageY < 0) return;                             // 16x16: decks carry the bars
-    int lit = fHP > 0 ? (fHP * rdW + FB.hp - 1) / FB.hp : 0;
+    int lit = fHP > 0 ? (fHP * rdW + bossHpMax() - 1) / bossHpMax() : 0;
     bool hot = (fVuln > 0 || (fVisor > 0 && !fFakeLift)) && (rdT & 2);
     for (int x = 0; x < lit && x < rdW; x++)
         r.setPixel(x, rdStageY, hot ? 255 : 200);
@@ -1301,23 +1496,26 @@ static void fightTick(Renderer& r) {
     case F_GAP:
         faceIdle(r, false);
         if (fPT >= fGapT) {
-            fType = drawTele();
-            fLast2 = fLast1; fLast1 = fType;
-            fFeint = false;
-            if (fType == T_BEAM) {
-                fSinceBeam = 0;
-                if (fParty >= 2) { fGlyph = esp_random() % 4; fFreq = fCode[fGlyph]; }
-                else             { fFreq = 1 + esp_random() % 4; }
+            if (FB.heads > 1) {                           // CHORUS: announce a round
+                buildRound();
+                fAnnounce = (uint16_t)(SEC(0.6f) * fRoundN);
+                fPhase = F_ANNOUNCE; fPT = 0;
+                fEvent("round");
+            } else {
+                fRoundN = 1; fRoundIdx = 0;
+                fRoundHead[0] = 0;
+                armTelegraph(drawTele());
+                fPhase = F_TELE; fPT = 0;
             }
-            if ((fType <= T_SWEEP_R || fType == T_BEAM) && DD.feints &&
-                MD.sigPct && !FB.armored)                 // MOTH: roll the feint
-                fFeint = (esp_random() % 100) < MD.sigPct;
-            if (fType == T_ACID)
-                for (int i = 0; i < 3; i++) { rdPY[i] = 13; rdPX[i] = 6 + esp_random() % 4; }
-            if (fType == T_DUST)
-                for (int i = 0; i < 6; i++) { rdPY[i] = 2 + i; rdPX[i] = esp_random() % rdW; }
-            fWin  = rollWin(fType);
-            fSide = 0; fOver = false;
+        }
+        break;
+    case F_ANNOUNCE:
+        // The order ticks across the lead head's band (§3.3) — the panel is
+        // where the sequence lives, so the decks never receive its contents.
+        faceIdle(r, false);
+        chorusArrows(r);
+        if (fPT >= fAnnounce) {
+            armTelegraph(fRound[0]);
             fPhase = F_TELE; fPT = 0;
         }
         break;
@@ -1381,11 +1579,23 @@ static void fightTick(Renderer& r) {
                     r.setPixel(esp_random() % rdW, esp_random() % rdFaceH, 45);
         } else if (fPT & 1)
             for (int y = 0; y < rdFaceH; y++) for (int x = 0; x < rdW; x++) r.setPixel(x, y, 255);
-        if (fPT >= 8) { fPhase = F_GAP; fPT = 0; fGapT = rollGap(); }
+        if (fPT >= 8) {
+            // Mid-round: the next head attacks immediately — the blocks have to
+            // land in sequence, so there is no breathing gap inside a chain.
+            if (fRoundIdx + 1 < fRoundN && headAlive(fRoundHead[fRoundIdx + 1])) {
+                fRoundIdx++;
+                armTelegraph(fRound[fRoundIdx]);
+                fPhase = F_TELE; fPT = 0;
+            } else {
+                fRoundN = 0; fRoundIdx = 0;
+                fPhase = F_GAP; fPT = 0; fGapT = rollGap();
+            }
+        }
         break;
     case F_TAUNT:
         switch (FB.anatomy) {
         case MOTH:    mothFace(r, 3, true); rdNoise(r, 5, rdFaceH); break;
+        case CHORUS:  chorusBands(r, -1, 0, true); break;   // unison grin
         case BULWARK: bulwarkSlats(r, (fPT & 2) ? 1 : 0, true); break;
         default:      rdBrow(r, 0, true); rdEyes(r, 0, false, (fPT & 4) ? 1 : -1);
                       rdMouth(r, 0, true); rdNoise(r, 5, rdFaceH); break;
@@ -1444,10 +1654,12 @@ size_t raidNet(char* buf, size_t cap) {
         "\"acid\":%d,\"acidHp\":%u,\"jam\":%d,\"rsy\":%d,"
         "\"lane\":%d,\"laneUp\":%d,\"laneMs\":%u,\"dust\":%d,"
         "\"bash\":%u,\"bashRemap\":%u,\"visor\":%u,\"shlCd\":%u,\"duds\":%d,"
+        "\"heads\":%u,\"headHp\":[%d,%d,%d],\"headMax\":%d,\"aim\":%d,\"lead\":%d,"
+        "\"roundN\":%u,\"roundIdx\":%u,\"announce\":%u,"
         "\"hint\":%d,\"paused\":%d,\"ev\":%lu,\"evn\":\"%s\"",
         SN[fState], FB.name, DD.name,
         fParty, MD.name, fAssist ? 1 : 0, fPhaseNo,
-        (int)fHP, (int)FB.hp, (int)fHull, (int)(DD.hull + (fAssist ? 2 : 0)),
+        (int)fHP, bossHpMax(), (int)fHull, (int)(DD.hull + (fAssist ? 2 : 0)),
         (unsigned)(fVuln * RD_TICKMS),
         fEnrage < 0 ? -1 : (int)(fEnrage * RD_TICKMS / 1000),
         fCrank, fShells, fPing, fHeavy,
@@ -1467,6 +1679,13 @@ size_t raidNet(char* buf, size_t cap) {
         (unsigned)(fVisor > 0 ? fVisor * RD_TICKMS : 0),
         (unsigned)(fShlCd * RD_TICKMS),
         DD.duds ? 1 : 0,          // deck warns the Medic that sloppy traces dud
+        // CHORUS: per-head pools and the Gunner's target, so the aim rocker can
+        // label itself TOP/MID/BOT and grey out corpses. Round PROGRESS only —
+        // never the queued telegraph types: the announced order lives on the
+        // panel (§0.4), and shipping it here would make the decks the display.
+        FB.heads, (int)fHeadHP[0], (int)fHeadHP[1], (int)fHeadHP[2],
+        (int)FB.hp, (int)fAim, (int)fLead,
+        fRoundN, fRoundIdx, (unsigned)(fPhase == F_ANNOUNCE ? fAnnounce * RD_TICKMS : 0),
         hint, (int)fPausedRole,
         (unsigned long)fEv, fEvName);
     if (n < 0 || (size_t)n >= cap) return 0;
@@ -1504,6 +1723,7 @@ bool raidTick(Renderer& r, uint32_t now) {
             static const uint8_t CUT[] = { 76, 66, 76, 71, 76 };   // per Boss anatomy
             switch (rdBoss) {
                 case MOTH:    tickMoth(r);    break;
+                case CHORUS:  tickChorus(r);  break;
                 case BULWARK: tickBulwark(r); break;
                 default:      tickVanta(r);   break;
             }
@@ -1515,6 +1735,7 @@ bool raidTick(Renderer& r, uint32_t now) {
             if (fPT < 30) {
                 switch (FB.anatomy) {
                 case MOTH:    mothFace(r, 3, true); rdNoise(r, 8, rdFaceH); break;
+                case CHORUS:  chorusBands(r, -1, 0, true); rdNoise(r, 5, rdFaceH); break;
                 case BULWARK: bulwarkSlats(r, (fPT & 2) ? 1 : 0, true);
                               rdNoise(r, 5, rdFaceH); break;
                 default:      rdMouth(r, 0, true); rdBrow(r, 0, true);

@@ -119,9 +119,9 @@ static void testSweep(uint8_t panels) {
     long hpNeg = 0, hullNeg = 0, badState = 0, netFail = 0, netTrunc = 0;
     size_t maxNet = 0;
     char prodBuf[GAME_NET_BUF], bigBuf[4096];
-    const char* bosses = "VMB";
+    const char* bosses = "VMCB";
 
-    for (int b = 0; b < 3; b++)
+    for (int b = 0; b < 4; b++)
     for (int party = 1; party <= 4; party++)
     for (uint8_t diff = 0; diff < 4; diff++) {
         startFight(bosses[b], party, diff);
@@ -345,6 +345,95 @@ static void testBashRemap() {
     leaveFight();
 }
 
+// 8. CHORUS (§3.3): three heads, damage follows the aim rocker, phases come
+//    from kills rather than HP gates, and survivors harmonize.
+static void testChorusHeads() {
+    Renderer& r = *makeCanvas(2);
+    R = &r;
+    raidInit(r);
+    startFight('C', 4, 1);
+
+    check(fHeadHP[0] == 35 && fHeadHP[1] == 35 && fHeadHP[2] == 35,
+          "CHORUS starts as three 35 HP heads");
+    check(fHP == 105, "total HP is the sum across heads");
+    check(fPhaseNo == 1, "phase 1 with every head alive");
+
+    // Aim at the middle head and kill only it.
+    while (fAim != 1) raidInput(1, 'z', true);
+    int otherBefore = fHeadHP[0] + fHeadHP[2];
+    for (int i = 0; i < 40 && fHeadHP[1] > 0 && fState == ST_FIGHT; i++) {
+        fCrank = 100; fShells = 1;
+        raidInput(1, 'F', true);
+    }
+    check(fHeadHP[1] == 0, "damage lands on the head the Gunner is aiming at");
+    check(fHeadHP[0] + fHeadHP[2] == otherBefore, "the other heads are untouched");
+    check(fAim != 1, "the aim rocker moves off a dead head");
+    check(fPhaseNo == 2, "a kill advances the phase (not an HP threshold)");
+
+    // Harmonize: with one head down, windows tighten and cadence rises.
+    uint16_t winOne = rollWin(T_BEAM);
+    fHeadHP[fAim] = 0;                       // simulate a second kill
+    uint16_t winTwo = rollWin(T_BEAM);
+    check(winTwo < winOne, "each dead head tightens the response window");
+    leaveFight();
+
+    // Killing the last head wins, and only then.
+    startFight('C', 4, 1);
+    for (int guard = 0; guard < 400 && fState == ST_FIGHT; guard++) {
+        fCrank = 100; fShells = 1;
+        raidInput(1, 'F', true);
+        if (!headAlive(fAim)) raidInput(1, 'z', true);
+    }
+    check(fState == ST_WIN, "killing all three heads wins the fight");
+    leaveFight();
+}
+
+// 9. CHORUS rounds: attacks arrive as an announced chain across the heads,
+//    capped by party size (§4: 2/2/3/3), and every attack has a live attacker.
+static void testChorusRounds() {
+    Renderer& r = *makeCanvas(2);
+    R = &r;
+    raidInit(r);
+
+    for (int party = 1; party <= 4; party++) {
+        startFight('C', party, 1);
+        int maxSeen = 0, announced = 0, badHead = 0, chained = 0;
+        for (int t = 0; t < 4000 && fState == ST_FIGHT; t++) {
+            g_millis += RD_TICKMS;
+            raidTick(r, g_millis);
+            if (fPhase == F_ANNOUNCE) announced++;
+            if (fRoundN > maxSeen) maxSeen = fRoundN;
+            if (fPhase == F_TELE && fRoundN) {
+                if (!headAlive(fRoundHead[fRoundIdx])) badHead++;
+                if (fRoundIdx > 0) chained++;
+            }
+            // Block everything so the fight survives long enough to sample.
+            if (fPhase == F_TELE) {
+                if      (fType == T_SWEEP_L) raidInput(0, 'L', true);
+                else if (fType == T_SWEEP_R) raidInput(0, 'R', true);
+                else if (fType == T_BEAM)    raidInput(0, (char)('0' + fFreq), true);
+                else if (fType == T_CHARGE)  raidInput(0, 'O', true);
+            }
+            if (fLane >= 0) raidInput((uint8_t)fLane, 'X', true);
+            if (fAcid >= 0) raidInput(3, 'W', true);
+            if (fJam  >= 0) raidInput(3, (char)('a' + fResync), true);
+            heartbeatAll();
+        }
+        char msg[96];
+        snprintf(msg, sizeof(msg), "party %d: rounds announced before the chain", party);
+        check(announced > 0, msg);
+        snprintf(msg, sizeof(msg), "party %d: chain length <= %d", party, ROUND_MAX[party]);
+        check(maxSeen >= 1 && maxSeen <= ROUND_MAX[party], msg);
+        snprintf(msg, sizeof(msg), "party %d: every queued attack has a living head", party);
+        check(badHead == 0, msg);
+        if (party >= 3) {
+            snprintf(msg, sizeof(msg), "party %d: chains actually run past the first attack", party);
+            check(chained > 0, msg);
+        }
+        leaveFight();
+    }
+}
+
 int main() {
     printf("raid engine — invariant sweep\n");
     testSweep(1);                           // 16x16: no stage row (decks carry the bars)
@@ -361,6 +450,10 @@ int main() {
     testSloppyForgeDuds();
     printf("raid engine — bash control displacement\n");
     testBashRemap();
+    printf("raid engine — CHORUS heads, aim + kill-driven phases\n");
+    testChorusHeads();
+    printf("raid engine — CHORUS rounds\n");
+    testChorusRounds();
 
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all checks passed",
            failures, failures == 1 ? "" : "s");

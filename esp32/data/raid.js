@@ -1,12 +1,14 @@
-/* Raid 16 — M2 deck client (docs/raid16.md v0.2 §11).
+/* Raid 16 — M2/M3 deck client (docs/raid16.md v0.2 §11).
    The device is authoritative: consoles send single-char keys with their
    console's ROLE as the player number, and decks render themselves from the
    ~10 Hz {"type":"raid"} snapshot. M2 adds deck bundles (2p: info/action;
    3p: shield/hacker/action; 1p: the condensed Pilot cockpit), the SIM LEVEL
    knob, MOTH's feint pulse + dust blindness, BULWARK's ping/heavy forge fork
    + riposte/visor loop + bash shudder, disconnect heartbeats, and the assist
-   governor chip. Phones never mirror the telegraphs (§0.4) — each deck sees
-   only what its role needs; reading the panel is the game. */
+   governor chip. M3 adds CHORUS: a bar per head, an aim rocker that targets a
+   head, and round PROGRESS (never the queued order — that is announced on the
+   panel). Phones never mirror the telegraphs (§0.4) — each deck sees only what
+   its role needs; reading the panel is the game. */
 
 let ws = null;
 
@@ -36,6 +38,8 @@ const GLYPHS = ['◇', '◆', '▲', '▽'];
 const ROLE_KEYS = ['shl', 'gun', 'hck', 'med'];
 const ROLE_NAMES = ['shield', 'gunner', 'hacker', 'medic'];
 const DIFF_ORDER = ['DRILL', 'FIELD', 'VETERAN', 'NIGHTMARE'];
+const HEAD_NAMES = ['top', 'mid', 'bot'];
+const isChorus = () => snap && snap.heads > 1;
 
 /* Deck bundles (§4/§5): consoles never disappear, they consolidate. */
 const BUNDLES = {
@@ -200,6 +204,9 @@ function renderFlow() {
     $('p-ping').hidden = true;
     $('mock-load').hidden = false;
     $('cockpit').classList.remove('bashing');
+    $('hp-single').hidden = false; $('head-bars').hidden = true;
+    $('round-strip').hidden = true; $('aim-lbl').hidden = true;
+    $('hp-fill').style.width = '100%';
     paintHull(10, 10); paintPhase(1);
   }
 }
@@ -269,6 +276,44 @@ function applyBashRemap(id) {
   $('deck-pil').classList.toggle('remapped', id !== 0);
 }
 
+/* CHORUS shows a bar per head (§3.3) — kill order is the strategy, so the team
+   needs to see the three pools, which one the Gunner is on, and which is
+   leading the next round. Single-head bosses keep the one aggregate bar. */
+function paintBossHp(s) {
+  const multi = s.heads > 1;
+  $('hp-single').hidden = multi;
+  $('head-bars').hidden = !multi;
+  if (!multi) {
+    $('hp-fill').style.width =
+      Math.max(0, Math.min(100, 100 * s.hp / (s.hpMax || 100))) + '%';
+    return;
+  }
+  const rows = $('head-bars').children;
+  for (let i = 0; i < rows.length; i++) {
+    const hp = s.headHp[i] | 0, max = s.headMax || 1;
+    rows[i].querySelector('.hp-bar > div').style.width =
+      Math.max(0, Math.min(100, 100 * hp / max)) + '%';
+    rows[i].classList.toggle('dead',  hp <= 0);
+    rows[i].classList.toggle('aimed', i === s.aim);
+    rows[i].classList.toggle('lead',  i === s.lead && hp > 0);
+  }
+}
+
+/* Round PROGRESS only — how many blocks are queued and where we are. The order
+   itself is announced on the panel (§0.4), never mirrored here. */
+function paintRound(s) {
+  const strip = $('round-strip');
+  const on = s.heads > 1 && s.roundN > 0 && inFight();
+  strip.hidden = !on;
+  if (!on) return;
+  const announcing = s.announce > 0;
+  strip.classList.toggle('announcing', announcing);
+  let html = announcing ? '<span>incoming ×' + s.roundN + '</span>' : '';
+  for (let i = 0; i < s.roundN; i++)
+    html += `<span class="rd ${i < s.roundIdx ? 'done' : i === s.roundIdx && !announcing ? 'now' : ''}"></span>`;
+  strip.innerHTML = html;
+}
+
 function cockpitFx(evn) {
   const good = ['block', 'vuln', 'vulnhit', 'interrupt', 'dodge', 'wiped', 'resync',
                 'win', 'visor', 'feint', 'dustclear', 'dustshot'];
@@ -299,8 +344,7 @@ function handleSnap(s) {
     $('np-epithet').textContent = `${s.diff.toLowerCase()} · party ${s.party}` +
       (s.assist ? ' · assist armed' : '');
   }
-  $('hp-fill').style.width =
-    Math.max(0, Math.min(100, 100 * s.hp / (s.hpMax || 100))) + '%';
+  paintBossHp(s);
   paintHull(s.hull, s.hullMax || 10); paintPhase(s.ph);
 
   $('enrage-tag').hidden = !(s.enrage >= 0 && fightish);
@@ -362,6 +406,9 @@ function handleSnap(s) {
   $('resync-rig').hidden = !(s.jam >= 0 && inFight());
   paintForge();
   syncSlimes(s);
+
+  paintRound(s);
+  paintAim(s);
 
   /* solo pilot: the alert diamond points at what needs you */
   paintPilot(s);
@@ -480,17 +527,34 @@ $('mock-load').onclick = () => {
   else { shellPing.classList.remove('loaded'); shellHeavy.classList.remove('loaded'); }
 };
 
+/* Aim rocker. On CHORUS it selects a HEAD (§3.3) and the device owns the
+   selection — kill order is the strategy, so the truth has to live in one
+   place. Elsewhere it's still a local 3-lamp mockup. */
 const gunL = $('gun-l'), gunR = $('gun-r');
 const lamps = ['lampL', 'lampM', 'lampR'].map(id => $(id));
 let aim = 1;
-function setAim(a) {                          // head targeting arrives with CHORUS (M3)
-  aim = a;
-  lamps.forEach((l, i) => l.classList.toggle('on', i === a));
-  gunL.classList.toggle('pressed', a === 0);
-  gunR.classList.toggle('pressed', a === 2);
+function paintAim(s) {
+  const multi = s.heads > 1;
+  $('aim-lbl').hidden = !multi;
+  if (!multi) return;
+  aim = s.aim;
+  lamps.forEach((l, i) => {
+    l.classList.toggle('on', i === s.aim);
+    l.style.opacity = (s.headHp[i] | 0) > 0 ? '' : '0.3';   // corpses grey out
+  });
+  $('aim-name').textContent = HEAD_NAMES[s.aim] || '?';
 }
-gunL.onpointerdown = (e) => { e.preventDefault(); setAim(Math.max(0, aim - 1)); };
-gunR.onpointerdown = (e) => { e.preventDefault(); setAim(Math.min(2, aim + 1)); };
+function nudgeAim(dir) {
+  if (isChorus()) { if (inFight()) roleKey(dir < 0 ? 'y' : 'z', 1); return; }
+  aim = Math.max(0, Math.min(2, aim + dir));                // local mockup
+  lamps.forEach((l, i) => l.classList.toggle('on', i === aim));
+}
+gunL.onpointerdown = (e) => { e.preventDefault(); gunL.classList.add('pressed'); nudgeAim(-1); };
+gunR.onpointerdown = (e) => { e.preventDefault(); gunR.classList.add('pressed'); nudgeAim(1); };
+['pointerup','pointercancel','pointerleave'].forEach(ev => {
+  gunL.addEventListener(ev, () => gunL.classList.remove('pressed'));
+  gunR.addEventListener(ev, () => gunR.classList.remove('pressed'));
+});
 
 const fireCover = $('fire-cover');
 const fireBtn = $('fire');
@@ -744,6 +808,7 @@ holdFx($('p-crank'),
           pCrankT = setInterval(() => roleKey('K', 1), 140); } },
   () => clearInterval(pCrankT));
 $('p-fire').onpointerdown = (e) => { e.preventDefault(); if (inFight()) roleKey('F', 1); };
+$('p-aim').onpointerdown  = (e) => { e.preventDefault(); if (inFight()) roleKey('z', 1); };
 $('p-ping').onpointerdown = (e) => { e.preventDefault(); if (inFight()) roleKey('P', 1); };
 
 const quads = ['q-shl', 'q-gun', 'q-hck', 'q-med'].map(id => $(id));

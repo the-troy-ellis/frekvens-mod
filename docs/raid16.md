@@ -452,8 +452,23 @@ WS ~10 KB/s. The cost is still **surface area**, not resources.
   for the shudder. Only the layout moves — each control still sends its
   true key — so it can't be exploited or desync the device; it costs you
   the reach you'd made from muscle memory.)* *Roster depth begins.*
-- **M3 — the evening.** CHORUS (triple anatomy, rounds, targeting),
-  mutations, gauntlet structure + mod drafts, persistence. *Replayable.*
+- **M3 — the evening.** *(in progress)*
+  - **CHORUS** ✅ *(shipped: the engine now carries per-head HP pools —
+    `FBossDef.heads`, with `hp` read as per-head — so damage lands on the
+    head the Gunner's aim rocker (`y`/`z`) has selected, and the rocker
+    steps off a corpse automatically. Phases come from KILLS rather than HP
+    gates for multi-head bosses, and each death makes the survivors
+    harmonize (cadence ×1.25, windows ×0.9 per kill, floored so a window
+    never becomes unreadable). ROUNDS: attacks are drawn as a chain handed
+    head-to-head from the lead, announced by arrows ticking across the
+    lead's band, then executed back-to-back with no gap — the blocks have
+    to land in sequence. Chain length is capped by party size (§4: 2/2/3/3).
+    Moods set who leads: SOPRANO top, BASSO bottom, ROUND rotates every
+    chain. The decks get a bar per head plus round PROGRESS only — the
+    announced order stays on the panel (§0.4), so the decks never become
+    the display.)*
+  - Mutations, gauntlet structure + mod drafts, persistence — still to do.
+  *Replayable.*
 - **M4 — the finale + juice.** NULL (all four corruptions, dialect theft,
   false wipe), D5, adaptive drift, bespoke deaths for all, HA audio events,
   spectator page, stats polish, human balance pass — the only pass that
