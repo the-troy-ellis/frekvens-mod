@@ -749,19 +749,37 @@ static const uint8_t N_FBOSS = sizeof(FBOSSES) / sizeof(FBOSSES[0]);
 //   remap — BASH briefly displaces every deck's controls (§3.4). Cosmetic
 //           below D4; at D4 the deck genuinely rearranges its controls, so
 //           muscle memory misfires and you have to read the labels.
+//   muts  — mutations rolled per fight in Quick Fight (§6: D3 one, D4 two).
 struct DiffDef { const char* name; float win, cad; int8_t hull; uint8_t enrageS;
-                 bool feints, afflict, duds, remap; };
+                 bool feints, afflict, duds, remap; uint8_t muts; };
 static const DiffDef DIFFS[4] = {
-    { "DRILL",     1.50f, 0.70f, 12,  0, false, false, false, false },
-    { "FIELD",     1.00f, 1.00f, 10, 90, true,  true,  false, false },
-    { "VETERAN",   0.85f, 1.15f, 10, 90, true,  true,  false, false },
-    { "NIGHTMARE", 0.70f, 1.30f,  8, 75, true,  true,  true,  true  },
+    { "DRILL",     1.50f, 0.70f, 12,  0, false, false, false, false, 0 },
+    { "FIELD",     1.00f, 1.00f, 10, 90, true,  true,  false, false, 0 },
+    { "VETERAN",   0.85f, 1.15f, 10, 90, true,  true,  false, false, 1 },
+    { "NIGHTMARE", 0.70f, 1.30f,  8, 75, true,  true,  true,  true,  2 },
 };
 
 // Dud chance for a forge the Medic's deck graded as sloppy. A clean forge is
-// never a dud — "sloppy forges make duds" is the whole rule. M3's CHEAP SHELLS
-// mutation raises this by 15 points.
+// never a dud — "sloppy forges make duds" is the whole rule. CHEAP SHELLS
+// raises this by 15 points.
 static const uint8_t SLOPPY_DUD_PCT = 35;
+
+// Mutations (§7.4): 1-2 rolled per fight, shown as icons on the intro
+// nameplate. Quick Fight gets them at D3+ (the gauntlet will always roll
+// them). They are deliberately cheap — almost all are scalar overrides on
+// values the engine already funnels through rollGap / rollWin / bossDamage —
+// which is what makes a ten-card pool affordable at this size.
+enum Mut : uint8_t {
+    M_BROWNOUT, M_CROSSWIRE, M_LOOSE, M_OVERTUNED, M_MOTESTORM,
+    M_ECHO, M_CHEAP, M_THIN, M_STICKY, M_LONG, M_N
+};
+static const char* MUT_NAME[M_N] = {
+    "BROWNOUT", "CROSSWIRE", "LOOSE WIRING", "OVERTUNED", "MOTE STORM",
+    "ECHO", "CHEAP SHELLS", "THIN ARMOR", "STICKY ACID", "LONG NIGHT",
+};
+static uint16_t fMuts;                                  // bitmask over Mut
+static inline bool mutOn(uint8_t m) { return (fMuts >> m) & 1u; }
+static bool brownoutNow();                               // defined next to the dim pass
 
 static const float PARTY_CAD[5] = { 1.0f, 0.5f, 0.65f, 0.8f, 1.0f };
 
@@ -803,6 +821,9 @@ static uint16_t fShlCd;                            // shield cooldown (feint pun
 static uint8_t  fDust;                             // MOTH: wipe strokes to clear
 static uint8_t  fFxShot;
 static int8_t   fAcid; static uint8_t fAcidHP;
+static int8_t   fAcid2; static uint16_t fAcidAge;  // STICKY ACID: spread target + timer
+static bool     fEchoPending;                      // ECHO: this telegraph fires twice
+static uint16_t fLooseT;                           // LOOSE WIRING: dial drift timer
 static int8_t   fJam;  static uint8_t fResync;
 static int8_t   fLane; static uint16_t fLaneT, fLaneGap;
 static uint8_t  fLast1, fLast2;                    // pity: last two draws
@@ -844,9 +865,21 @@ static void fEvent(const char* n) {
 
 // Max hull for this fight (difficulty baseline + the assist governor's bonus).
 // The 8-segment stage bar and the deck's LED row both scale to it.
-static int hullMax() { return DIFFS[fDiff].hull + (fAssist ? 2 : 0); }
+static int hullMax() {
+    int m = DIFFS[fDiff].hull + (fAssist ? 2 : 0) - (mutOn(M_THIN) ? 2 : 0);
+    return m < 1 ? 1 : m;
+}
 
-static bool roleDown(int8_t role) { return fAcid == role || fJam == role; }
+static bool roleDown(int8_t role) {
+    return fAcid == role || fAcid2 == role || fJam == role;
+}
+// Boss damage taken, scaled by the glass-cannon mutations (§7.4).
+static float dmgMul() {
+    float m = 1.0f;
+    if (mutOn(M_THIN))      m *= 1.25f;
+    if (mutOn(M_OVERTUNED)) m *= 1.25f;
+    return m;
+}
 
 // --- head helpers (trivial for single-head bosses) ---
 static int  bossHpMax()      { return FB.hp * FB.heads; }
@@ -877,6 +910,7 @@ static uint16_t rollGap() {
     uint16_t g = lo + esp_random() % (uint16_t)(hi - lo + 1);
     float scale = PARTY_CAD[fParty] / MD.cadScale / DD.cad / harmCad()
                 * (fAssist ? 1.1f : 1.0f);
+    if (mutOn(M_OVERTUNED)) scale /= 1.15f;
     return (uint16_t)(g * scale);
 }
 static uint16_t rollWin(uint8_t t) {
@@ -887,7 +921,9 @@ static uint16_t rollWin(uint8_t t) {
     else if (t == T_ACID || t == T_JAM || t == T_DUST) base = SEC(1.5f);   // land anim
     else if (t == T_BASH)   base = SEC(1.2f);
     else                    base = SEC(2.5f);      // sweeps
-    uint16_t w = (uint16_t)(base * MD.winScale * DD.win * harmWin());
+    float f = MD.winScale * DD.win * harmWin();
+    if (mutOn(M_ECHO)) f *= 0.8f;                  // it fires twice, and faster
+    uint16_t w = (uint16_t)(base * f);
     return w < 4 ? 4 : w;                          // keep every window tickable
 }
 static uint16_t rollLaneGap() { return SEC(4) + esp_random() % SEC(2); }
@@ -906,6 +942,7 @@ static uint8_t drawTele() {
     uint8_t w[T_N]; uint16_t tot = 0;
     for (uint8_t t = 0; t < T_N; t++) {
         int wt = FB.teleW[fPhaseNo - 1][t] + MD.dW[t];
+        if (t == T_DUST && mutOn(M_MOTESTORM) && wt < 2) wt = 2;   // guest star
         if (t == T_ACID || t == T_JAM || t == T_DUST)
             if (fParty < 2 || !DD.afflict) wt = 0;
         if (t == T_ACID && fAcid >= 0)  wt = 0;
@@ -949,7 +986,7 @@ static void checkPhase() {
         fPhaseNo = want;
         fPhase = F_TAUNT; fPT = 0;
         if (fPhaseNo == 3) {
-            if (DD.enrageS) fEnrage = SEC(DD.enrageS);
+            if (DD.enrageS) fEnrage = SEC(DD.enrageS + (mutOn(M_LONG) ? 30 : 0));
             // Lane fire is an affliction, so DRILL strips it like acid/jam/dust.
             // Gated explicitly: it used to ride on DD.enrageS, which left
             // fLaneGap at whatever the PREVIOUS fight had rolled — so whether
@@ -963,6 +1000,8 @@ static void checkPhase() {
 // Damage lands on the head the Gunner is aiming at (single-head bosses always
 // aim at head 0). fHP is the derived total the panel bar and the decks show.
 static void bossDamage(int d) {
+    d = (int)(d * dmgMul() + 0.5f);
+    if (d < 1) d = 1;
     fStats.dmg += d;
     uint8_t h = headAlive(fAim) ? fAim : nextLiveHead(fAim);
     fHeadHP[h] -= d;
@@ -994,7 +1033,12 @@ static void clearDust(const char* how) {
 // Make `type` the live telegraph: roll its window, seed whatever the animation
 // needs, clear the team's latched responses. Shared by single attacks and by
 // each element of a CHORUS round, so the alphabet behaves identically in both.
-static void armTelegraph(uint8_t type) {
+static void armTelegraph(uint8_t type, bool isEcho = false) {
+    // ECHO (§7.4): a real telegraph fires twice back-to-back. Afflictions are
+    // excluded — echoing an acid landing would just double the affliction,
+    // not the reading challenge the card is about.
+    bool echoable = type <= T_SWEEP_R || type == T_BEAM || type == T_CHARGE;
+    fEchoPending = mutOn(M_ECHO) && echoable && !isEcho;
     fType  = type;
     fLast2 = fLast1; fLast1 = type;
     fFeint = false;
@@ -1102,12 +1146,28 @@ static void fightBegin() {
         uint8_t t = fCode[i]; fCode[i] = fCode[j]; fCode[j] = t;
     }
     fAssist = fDiff <= 1 && fWipeStreak[fBoss] >= 2;     // the governor (§6)
+
+    // Roll this fight's mutations (§7.4) — distinct draws from the pool.
+    fMuts = 0;
+    for (uint8_t i = 0, guard = 0; i < DD.muts && guard < 64; guard++) {
+        uint8_t m = esp_random() % M_N;
+        if (mutOn(m)) continue;                          // no duplicates
+        fMuts |= (uint16_t)(1u << m);
+        i++;
+    }
+
     for (uint8_t h = 0; h < MAX_HEADS; h++) fHeadHP[h] = h < FB.heads ? FB.hp : 0;
-    fHP = bossHpMax();
+    if (mutOn(M_LONG)) {                                 // the siege fight: +15 HP
+        uint8_t per = (uint8_t)(15 / FB.heads);
+        for (uint8_t h = 0; h < FB.heads; h++) fHeadHP[h] += per;
+    }
+    fHP = 0;
+    for (uint8_t h = 0; h < FB.heads; h++) fHP += fHeadHP[h];
     fAim = 0;
     fLead = MD.lead == LEAD_BOTTOM ? (uint8_t)(FB.heads - 1) : 0;
     fRoundN = fRoundIdx = 0; fAnnounce = 0;
-    fHull = DD.hull + (fAssist ? 2 : 0);
+    fHull = DD.hull + (fAssist ? 2 : 0) - (mutOn(M_THIN) ? 2 : 0);
+    if (fHull < 1) fHull = 1;
     fPhaseNo = 1; fPhase = F_GAP;
     fSide = 0; fDial = 0; fOver = false; fOk = false;
     fCrank = 0; fShells = 0; fPing = 0; fHeavy = 0;
@@ -1117,7 +1177,8 @@ static void fightBegin() {
     fBash = 0; fBashRemap = 0;
     fFeint = false; fFeintFx = 0; fShlCd = 0; fDust = 0;
     fFxShot = 0;
-    fAcid = -1; fAcidHP = 0; fJam = -1;
+    fAcid = -1; fAcidHP = 0; fAcid2 = -1; fAcidAge = 0; fJam = -1;
+    fEchoPending = false; fLooseT = 0;
     fLane = -1; fLaneT = 0; fLaneGap = 0;   // must reset: these are file-static and
                                             // a leftover gap would fire lanes in a
                                             // difficulty that has them disabled
@@ -1193,7 +1254,8 @@ static bool fightInput(uint8_t p, char k) {
         // Only a sloppy trace can dud, and only at a difficulty that has duds.
         case 'T': case 't':                        // medic sends heavy / generic
             if (fParty >= 2 && !roleDown(R_MEDIC)) {
-                bool dud = DD.duds && k == 't' && (esp_random() % 100) < SLOPPY_DUD_PCT;
+                uint8_t pct = SLOPPY_DUD_PCT + (mutOn(M_CHEAP) ? 15 : 0);
+                bool dud = DD.duds && k == 't' && (esp_random() % 100) < pct;
                 if (FB.armored) { if (!fHeavy) { fHeavy = 1; fDudHeavy = dud; fEvent("shell"); } }
                 else if (fShells < 2) { fShells++; if (dud) fDudGen = true; fEvent("shell"); }
             }
@@ -1201,13 +1263,20 @@ static bool fightInput(uint8_t p, char k) {
         case 'U': case 'u':                        // medic sends a ping (BULWARK)
             if (fParty >= 2 && !roleDown(R_MEDIC) && FB.armored && !fPing) {
                 fPing = 1;
-                fDudPing = DD.duds && k == 'u' && (esp_random() % 100) < SLOPPY_DUD_PCT;
+                fDudPing = DD.duds && k == 'u' &&
+                           (esp_random() % 100) < SLOPPY_DUD_PCT + (mutOn(M_CHEAP) ? 15 : 0);
                 fEvent("shell");
             }
             return true;
         case 'W':                                  // wipe: acid first, then dust
             if (fAcid >= 0 && fAcidHP > 0) {
-                if (--fAcidHP == 0) { fAcid = -1; fStats.wip++; fEvent("wiped"); }
+                if (--fAcidHP == 0) {
+                    fStats.wip++;
+                    if (fAcid2 >= 0) {                 // STICKY: the spread is next
+                        fAcid = fAcid2; fAcid2 = -1; fAcidHP = 6; fAcidAge = 0;
+                        fEvent("wiped");
+                    } else { fAcid = -1; fEvent("wiped"); }
+                }
             } else if (fDust > 0) {
                 if (--fDust == 0) fEvent("dustclear");
             }
@@ -1471,6 +1540,24 @@ static void fightTick(Renderer& r) {
     if (fBash && --fBash == 0) fBashRemap = 0;   // controls settle back
     if (fShlCd) fShlCd--;
     if (fFeintFx) fFeintFx--;
+
+    // STICKY ACID (§7.4): left alone for 6 s it creeps onto a second deck.
+    if (fAcid >= 0) {
+        fAcidAge++;
+        if (mutOn(M_STICKY) && fAcid2 < 0 && fAcidAge > SEC(6)) {
+            int8_t t = (int8_t)(esp_random() % 4);
+            if (t == fAcid) t = (int8_t)((t + 1) % 4);
+            fAcid2 = t;
+            fEvent("spread");
+        }
+    } else fAcidAge = 0;
+
+    // LOOSE WIRING (§7.4): the frequency dial creeps a detent until tapped back.
+    if (mutOn(M_LOOSE) && fDial && ++fLooseT > SEC(4)) {
+        fLooseT = 0;
+        fDial = (uint8_t)(fDial == 4 ? 3 : fDial + 1);
+        fEvent("drift");
+    }
     fSinceBeam++;
     if (fEnrage > 0 && --fEnrage == 0) { toLose(); return; }
 
@@ -1580,6 +1667,12 @@ static void fightTick(Renderer& r) {
         } else if (fPT & 1)
             for (int y = 0; y < rdFaceH; y++) for (int x = 0; x < rdW; x++) r.setPixel(x, y, 255);
         if (fPT >= 8) {
+            if (fEchoPending) {                        // ECHO: the same tell again
+                armTelegraph(fType, true);
+                fPhase = F_TELE; fPT = 0;
+                fEvent("echo");
+                break;
+            }
             // Mid-round: the next head attacks immediately — the blocks have to
             // land in sequence, so there is no breathing gap inside a chain.
             if (fRoundIdx + 1 < fRoundN && headAlive(fRoundHead[fRoundIdx + 1])) {
@@ -1656,6 +1749,7 @@ size_t raidNet(char* buf, size_t cap) {
         "\"bash\":%u,\"bashRemap\":%u,\"visor\":%u,\"shlCd\":%u,\"duds\":%d,"
         "\"heads\":%u,\"headHp\":[%d,%d,%d],\"headMax\":%d,\"aim\":%d,\"lead\":%d,"
         "\"roundN\":%u,\"roundIdx\":%u,\"announce\":%u,"
+        "\"muts\":%u,\"dial\":%u,\"acid2\":%d,\"brownout\":%d,"
         "\"hint\":%d,\"paused\":%d,\"ev\":%lu,\"evn\":\"%s\"",
         SN[fState], FB.name, DD.name,
         fParty, MD.name, fAssist ? 1 : 0, fPhaseNo,
@@ -1686,6 +1780,11 @@ size_t raidNet(char* buf, size_t cap) {
         FB.heads, (int)fHeadHP[0], (int)fHeadHP[1], (int)fHeadHP[2],
         (int)FB.hp, (int)fAim, (int)fLead,
         fRoundN, fRoundIdx, (unsigned)(fPhase == F_ANNOUNCE ? fAnnounce * RD_TICKMS : 0),
+        // Mutations as a bitmask (names live in the deck) plus the bits of
+        // state they make the decks responsible for: the dial is device-owned
+        // now that LOOSE WIRING drifts it, and STICKY ACID needs a second
+        // downed deck to be visible.
+        (unsigned)fMuts, fDial, (int)fAcid2, brownoutNow() ? 1 : 0,
         hint, (int)fPausedRole,
         (unsigned long)fEv, fEvName);
     if (n < 0 || (size_t)n >= cap) return 0;
@@ -1703,6 +1802,21 @@ size_t raidNet(char* buf, size_t cap) {
     if ((size_t)(n + 1) >= cap) return 0;
     buf[n++] = '}'; buf[n] = 0;
     return (size_t)n;
+}
+
+// BROWNOUT (§7.4): the panel sags to ~40% for 3 s at a time. Content renders
+// at full level first and is scaled on the way out, so telegraphs persist and
+// stay readable — you just have to squint.
+static bool brownoutNow() {
+    if (!mutOn(M_BROWNOUT) || fState != ST_FIGHT) return false;
+    return ((rdT / SEC(3)) & 1) != 0;                 // 3 s on, 3 s off
+}
+static void applyBrownout(Renderer& r) {
+    for (int y = 0; y < rdH; y++)
+        for (int x = 0; x < rdW; x++) {
+            uint8_t v = r.getPixel(x, y);
+            if (v) r.setPixel(x, y, (uint8_t)(v * 2 / 5));
+        }
 }
 
 bool raidTick(Renderer& r, uint32_t now) {
@@ -1748,6 +1862,7 @@ bool raidTick(Renderer& r, uint32_t now) {
         case ST_STATS: statsTick(r); break;
         default: break;
         }
+        if (brownoutNow()) applyBrownout(r);
         return true;
     }
 

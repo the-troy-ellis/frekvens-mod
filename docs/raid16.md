@@ -467,7 +467,23 @@ WS ~10 KB/s. The cost is still **surface area**, not resources.
     chain. The decks get a bar per head plus round PROGRESS only — the
     announced order stays on the panel (§0.4), so the decks never become
     the display.)*
-  - Mutations, gauntlet structure + mod drafts, persistence — still to do.
+  - **Mutations** ✅ *(shipped: all ten cards from §7.4, rolled distinct per
+    fight — none below VETERAN, one at D3, two at D4 (the gauntlet will
+    always roll them). Most are scalar overrides on values the engine
+    already funnels through `rollGap` / `rollWin` / `bossDamage`, which is
+    what makes a ten-card pool affordable: OVERTUNED, THIN ARMOR, LONG
+    NIGHT, ECHO, CHEAP SHELLS, MOTE STORM. The behavioural four: ECHO
+    re-arms the same telegraph once, back-to-back (afflictions excluded —
+    echoing an acid landing doubles the affliction, not the reading);
+    STICKY ACID creeps onto a second deck after 6 s unwiped and the wipe
+    then promotes the spread; LOOSE WIRING drifts the device-owned dial a
+    detent every 4 s until tapped back; BROWNOUT scales the whole frame to
+    40% in 3 s stretches as a post-pass, so telegraphs render normally
+    underneath and the card really is "squint". CROSSWIRE relocates the
+    Shield's OVERCHARGE onto the Gunner's deck and the Gunner's FIRE onto
+    the Shield's — the controls keep their meaning and their owning role,
+    they just live somewhere else, so the shouting doubles.)*
+  - Gauntlet structure + mod drafts, persistence — still to do.
   *Replayable.*
 - **M4 — the finale + juice.** NULL (all four corruptions, dialect theft,
   false wipe), D5, adaptive drift, bespoke deaths for all, HA audio events,

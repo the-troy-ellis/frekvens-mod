@@ -39,6 +39,14 @@ const ROLE_KEYS = ['shl', 'gun', 'hck', 'med'];
 const ROLE_NAMES = ['shield', 'gunner', 'hacker', 'medic'];
 const DIFF_ORDER = ['DRILL', 'FIELD', 'VETERAN', 'NIGHTMARE'];
 const HEAD_NAMES = ['top', 'mid', 'bot'];
+/* Mutation names mirror the device's Mut enum order (§7.4) — the snapshot
+   ships a bitmask, not strings, to keep it small. */
+const MUT_NAMES = ['BROWNOUT', 'CROSSWIRE', 'LOOSE WIRING', 'OVERTUNED',
+                   'MOTE STORM', 'ECHO', 'CHEAP SHELLS', 'THIN ARMOR',
+                   'STICKY ACID', 'LONG NIGHT'];
+const MUT = { BROWNOUT:0, CROSSWIRE:1, LOOSE:2, OVERTUNED:3, MOTESTORM:4,
+              ECHO:5, CHEAP:6, THIN:7, STICKY:8, LONG:9 };
+const mutOn = (m) => !!(snap && ((snap.muts >> m) & 1));
 const isChorus = () => snap && snap.heads > 1;
 
 /* Deck bundles (§4/§5): consoles never disappear, they consolidate. */
@@ -314,6 +322,51 @@ function paintRound(s) {
   strip.innerHTML = html;
 }
 
+/* Rolled mutations, listed on the cockpit like the intro nameplate icons. */
+let mutsShown = -1;
+function paintMuts(s) {
+  const strip = $('mut-strip');
+  const on = s.muts && s.st !== 'idle';
+  strip.hidden = !on;
+  if (s.muts === mutsShown) return;
+  mutsShown = s.muts;
+  strip.innerHTML = '';
+  MUT_NAMES.forEach((n, i) => {
+    if (!((s.muts >> i) & 1)) return;
+    const c = document.createElement('span');
+    c.className = 'mut';
+    c.textContent = n;
+    strip.appendChild(c);
+  });
+  applyCrosswire((s.muts >> MUT.CROSSWIRE) & 1);
+  applyCheapShells((s.muts >> MUT.CHEAP) & 1);
+}
+
+/* CROSSWIRE (§7.4): two decks swap a control. The button keeps its meaning —
+   OVERCHARGE is still 'O' — it just lives on someone else's deck now, so the
+   owner has to shout for it. Device-declared so both decks agree. */
+let crosswired = false;
+function applyCrosswire(on) {
+  on = !!on;
+  if (on === crosswired) return;
+  crosswired = on;
+  const shl = $('deck-shl'), gun = $('deck-gun');
+  const over = $('shl-over'), fire = $('fire-rig');
+  if (on) { gun.appendChild(over); shl.appendChild(fire); }
+  else    { shl.appendChild(over); gun.appendChild(fire); }
+  $('xwire-shl').hidden = !on;
+  $('xwire-gun').hidden = !on;
+}
+
+/* CHEAP SHELLS (§7.4): the forge trace is one node shorter (and duds more). */
+let cheapShells = false;
+function applyCheapShells(on) {
+  cheapShells = !!on;
+  $('node-4').style.display = cheapShells ? 'none' : '';
+  $('forge-cheap').hidden = !cheapShells;
+  resetForge();
+}
+
 function cockpitFx(evn) {
   const good = ['block', 'vuln', 'vulnhit', 'interrupt', 'dodge', 'wiped', 'resync',
                 'win', 'visor', 'feint', 'dustclear', 'dustshot'];
@@ -367,7 +420,8 @@ function handleSnap(s) {
   /* my bundle's alerts */
   const alerts = [];
   if (s.paused >= 0) alerts.push(`DECK ${ROLE_NAMES[s.paused].toUpperCase()} LOST — boss asleep`);
-  if (myRoles.includes(s.acid)) alerts.push('ACID ON YOUR DECK — shout for the medic!');
+  if (myRoles.includes(s.acid) || myRoles.includes(s.acid2))
+    alerts.push('ACID ON YOUR DECK — shout for the medic!');
   if (myRoles.includes(s.jam))  alerts.push('JAMMED — medic re-sync!');
   $('deck-alert').hidden = alerts.length === 0;
   $('deck-alert').textContent = alerts.join('  ·  ');
@@ -390,6 +444,7 @@ function handleSnap(s) {
   $('breach-hint').hidden = !(fightish && s.party >= 2);
   $('fire-ping').hidden = !(inFight() && isBulwark());
   $('p-ping').hidden = !(inFight() && isBulwark());
+  if (inFight() && s.dial && s.dial !== freq) showFreq(s.dial);   // LOOSE WIRING drift
   if (!crankDragging && inFight()) {
     crankPct = s.crank; crankSent = Math.floor(s.crank / 10);
     paintCrank();
@@ -402,13 +457,14 @@ function handleSnap(s) {
 
   /* medic: triage + resync pad + wipe slimes + forge labels */
   ROLE_KEYS.forEach((r, i) =>
-    $('tri-' + r).classList.toggle('alert', s.acid === i || s.jam === i));
+    $('tri-' + r).classList.toggle('alert', s.acid === i || s.acid2 === i || s.jam === i));
   $('resync-rig').hidden = !(s.jam >= 0 && inFight());
   paintForge();
   syncSlimes(s);
 
   paintRound(s);
   paintAim(s);
+  paintMuts(s);
 
   /* solo pilot: the alert diamond points at what needs you */
   paintPilot(s);
@@ -440,11 +496,16 @@ const knob = $('freq-knob');
 const stem = $('knob-stem');
 const DETENT_ANG = [-60, -20, 20, 60];
 let freq = 1;
-function setFreq(f) {
+/* Paint the knob without sending — used when the DEVICE moved the dial
+   (LOOSE WIRING drift), so the player sees it creep and can tap it back. */
+function showFreq(f) {
   freq = f;
   stem.style.transform = `rotate(${DETENT_ANG[f - 1] + 180}deg)`;
   document.querySelectorAll('#knob-detents span').forEach(s =>
     s.classList.toggle('on', +s.dataset.f === f));
+}
+function setFreq(f) {
+  showFreq(f);
   if (inFight()) roleKey(f, 0);
 }
 knob.addEventListener('pointerdown', (e) => { e.preventDefault(); knob.setPointerCapture(e.pointerId); });
@@ -672,6 +733,7 @@ paintCodebook(null);
    turns sloppy shells into duds (§6 D4) — a clean trace is always safe, so
    this is a skill tax on panicking, not a dice roll. */
 const FORGE_CLEAN_MS = 2500;                    // slower than this = fumbled
+const forgeLen = () => (cheapShells ? 3 : 4);   // CHEAP SHELLS: one node shorter
 let forgeNext = 1, forgeSlips = 0, forgeStart = 0;
 const sendBtn = $('send-shell');
 function forgeSloppy() {
@@ -679,9 +741,10 @@ function forgeSloppy() {
 }
 function paintForge() {
   const fork = isBulwark() && inFight();
-  if (forgeNext === 3 && fork) { sendBtn.disabled = false; sendBtn.textContent = 'send PING'; }
-  else if (forgeNext === 5)    { sendBtn.disabled = false; sendBtn.textContent = fork ? 'send HEAVY' : 'send shell'; }
-  else { sendBtn.disabled = forgeNext !== 3 || !fork; if (sendBtn.disabled) sendBtn.textContent = 'send to gunner'; }
+  const full = forgeLen() + 1;                  // forgeNext after the last node
+  if (forgeNext === 3 && fork && full > 3) { sendBtn.disabled = false; sendBtn.textContent = 'send PING'; }
+  else if (forgeNext === full) { sendBtn.disabled = false; sendBtn.textContent = fork ? 'send HEAVY' : 'send shell'; }
+  else { sendBtn.disabled = true; sendBtn.textContent = 'send to gunner'; }
   // Live grade, so the Medic can feel the tax before they send.
   const grade = $('forge-grade');
   const dudsOn = snap && snap.duds && inFight();
@@ -715,7 +778,7 @@ function resetForge() {
   $('forge-grade').hidden = true;
 }
 sendBtn.onclick = () => {
-  const ping   = forgeNext === 3;               // fork: 2 nodes = ping, 4 = heavy
+  const ping   = forgeNext === 3 && forgeLen() > 2;   // fork: 2 nodes = ping
   const sloppy = forgeSloppy();
   const k = (ping && isBulwark()) ? 'U' : 'T';
   resetForge();
@@ -753,7 +816,7 @@ function spawnSlime(dusty) {
   pad.appendChild(s);
 }
 function syncSlimes(s) {
-  const busy = (s.acid >= 0 || s.dust) && inFight();
+  const busy = (s.acid >= 0 || s.acid2 >= 0 || s.dust) && inFight();
   const have = pad.querySelectorAll('.slime').length;
   if (busy && have < 3) spawnSlime(s.acid < 0);
   if (!busy && snap && have) pad.querySelectorAll('.slime').forEach(x => x.remove());
@@ -768,7 +831,7 @@ pad.addEventListener('pointermove', (e) => {
         e.clientY >= r.top - 6 && e.clientY <= r.bottom + 6) {
       if (--sl.dataset.hp <= 0) sl.remove();
       else sl.style.opacity = sl.dataset.hp / 6;
-      if (inFight() && snap && (snap.acid >= 0 || snap.dust) &&
+      if (inFight() && snap && (snap.acid >= 0 || snap.acid2 >= 0 || snap.dust) &&
           Date.now() - lastWipeSent > 120) {
         lastWipeSent = Date.now();
         roleKey('W', 3);

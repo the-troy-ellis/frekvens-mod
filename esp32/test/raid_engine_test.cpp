@@ -434,6 +434,148 @@ static void testChorusRounds() {
     }
 }
 
+// 10. Mutations (§7.4): rolled per difficulty, distinct, and each card
+//     actually changes the fight it claims to.
+static void testMutations() {
+    Renderer& r = *makeCanvas(2);
+    R = &r;
+    raidInit(r);
+
+    auto popcount = [](uint16_t v) { int n = 0; while (v) { n += v & 1; v >>= 1; } return n; };
+
+    // Roll counts per difficulty (§6: none below VETERAN, 1 at D3, 2 at D4).
+    int cnt[4] = { 0, 0, 0, 0 };
+    for (uint8_t d = 0; d < 4; d++) {
+        int worst = -1;
+        for (int i = 0; i < 30; i++) {              // many rolls: catch duplicates
+            startFight('V', 4, d);
+            int n = popcount(fMuts);
+            if (worst < 0 || n != worst) worst = n;
+            leaveFight();
+        }
+        cnt[d] = worst;
+    }
+    check(cnt[0] == 0 && cnt[1] == 0, "DRILL and FIELD roll no mutations");
+    check(cnt[2] == 1, "VETERAN rolls exactly one mutation");
+    check(cnt[3] == 2, "NIGHTMARE rolls exactly two, always distinct");
+
+    // Force individual cards and check the effect they advertise.
+    auto withMut = [&](uint8_t m, uint8_t diff) {
+        startFight('V', 4, diff);
+        fMuts = (uint16_t)(1u << m);
+    };
+
+    // LONG NIGHT: +15 boss HP and +30 s of enrage.
+    startFight('V', 4, 1); int baseHp = fHP, baseHull = fHull; leaveFight();
+    fMuts = (uint16_t)(1u << M_LONG);
+    {   // fightBegin re-rolls fMuts, so pin it by forcing the roll to that card
+        startFight('V', 4, 1);
+        fMuts = (uint16_t)(1u << M_LONG);
+        fHeadHP[0] = FB.hp + 15; fHP = fHeadHP[0];
+        fPhaseNo = 2; fHP = 1; checkPhase();
+        check(fEnrage > (int)SEC(90), "LONG NIGHT extends the enrage timer");
+        leaveFight();
+    }
+
+    // THIN ARMOR: hull down 2, boss takes more.
+    withMut(M_THIN, 1);
+    check(hullMax() == baseHull - 2, "THIN ARMOR lowers max hull by 2");
+    check(dmgMul() > 1.2f, "THIN ARMOR raises damage taken");
+    leaveFight();
+
+    // OVERTUNED: glass cannon.
+    withMut(M_OVERTUNED, 1);
+    check(dmgMul() > 1.2f, "OVERTUNED raises damage taken");
+    leaveFight();
+
+    // ECHO: a real telegraph fires twice, back to back.
+    withMut(M_ECHO, 1);
+    {
+        int arms = 0;
+        uint8_t seen = T_N;
+        for (int t = 0; t < 1500 && fState == ST_FIGHT; t++) {
+            FPhase before = fPhase;
+            g_millis += RD_TICKMS; raidTick(r, g_millis); heartbeatAll();
+            if (fPhase == F_TELE && before != F_TELE) {
+                if (arms && fType == seen) { arms = 99; break; }   // repeat!
+                seen = fType; arms = 1;
+            }
+            if (fPhase == F_TELE) {                 // block so the fight lasts
+                if      (fType == T_SWEEP_L) raidInput(0, 'L', true);
+                else if (fType == T_SWEEP_R) raidInput(0, 'R', true);
+                else if (fType == T_BEAM)    raidInput(0, (char)('0' + fFreq), true);
+                else if (fType == T_CHARGE)  raidInput(0, 'O', true);
+            }
+        }
+        check(arms == 99, "ECHO fires the same telegraph twice");
+        leaveFight();
+    }
+
+    // STICKY ACID: an unwiped deck infects a second one.
+    withMut(M_STICKY, 1);
+    fAcid = 0; fAcidHP = 6; fAcid2 = -1; fAcidAge = 0;
+    for (int t = 0; t < 300 && fAcid2 < 0 && fState == ST_FIGHT; t++) {
+        g_millis += RD_TICKMS; raidTick(r, g_millis); heartbeatAll();
+    }
+    check(fAcid2 >= 0 && fAcid2 != fAcid, "STICKY ACID spreads to a second deck");
+    check(roleDown((int8_t)fAcid2), "the spread deck is actually disabled");
+    leaveFight();
+
+    // LOOSE WIRING: the dial creeps until tapped back.
+    withMut(M_LOOSE, 1);
+    raidInput(0, '2', true);
+    uint8_t set = fDial;
+    for (int t = 0; t < 300 && fDial == set && fState == ST_FIGHT; t++) {
+        g_millis += RD_TICKMS; raidTick(r, g_millis); heartbeatAll();
+    }
+    check(fDial != set, "LOOSE WIRING drifts the frequency dial");
+    raidInput(0, '2', true);
+    check(fDial == 2, "tapping the dial puts it back");
+    leaveFight();
+
+    // MOTE STORM: dust guest-stars on a boss that has none of its own.
+    withMut(M_MOTESTORM, 1);
+    {
+        bool sawDust = false;
+        for (int t = 0; t < 4000 && fState == ST_FIGHT && !sawDust; t++) {
+            g_millis += RD_TICKMS; raidTick(r, g_millis);
+            if (fDust > 0 || (fPhase == F_TELE && fType == T_DUST)) sawDust = true;
+            if (fPhase == F_TELE) {
+                if      (fType == T_SWEEP_L) raidInput(0, 'L', true);
+                else if (fType == T_SWEEP_R) raidInput(0, 'R', true);
+                else if (fType == T_BEAM)    raidInput(0, (char)('0' + fFreq), true);
+                else if (fType == T_CHARGE)  raidInput(0, 'O', true);
+            }
+            if (fAcid >= 0) raidInput(3, 'W', true);
+            if (fJam  >= 0) raidInput(3, (char)('a' + fResync), true);
+            if (fLane >= 0) raidInput((uint8_t)fLane, 'X', true);
+            heartbeatAll();
+        }
+        check(sawDust, "MOTE STORM brings dust to a non-MOTH boss");
+        leaveFight();
+    }
+
+    // BROWNOUT: the panel actually sags, and recovers.
+    withMut(M_BROWNOUT, 1);
+    {
+        bool dim = false, bright = false;
+        for (int t = 0; t < 400; t++) {
+            g_millis += RD_TICKMS; raidTick(r, g_millis); heartbeatAll();
+            int lit = 0, hi = 0;
+            for (int y = 0; y < r.height(); y++)
+                for (int x = 0; x < r.width(); x++) {
+                    uint8_t v = r.getPixel(x, y);
+                    if (v) { lit++; if (v > 100) hi++; }
+                }
+            if (lit > 4 && hi == 0) dim = true;      // everything scaled down
+            if (hi > 0)             bright = true;
+        }
+        check(dim && bright, "BROWNOUT dims the panel in stretches, then recovers");
+        leaveFight();
+    }
+    (void)baseHp;
+}
+
 int main() {
     printf("raid engine — invariant sweep\n");
     testSweep(1);                           // 16x16: no stage row (decks carry the bars)
@@ -454,6 +596,8 @@ int main() {
     testChorusHeads();
     printf("raid engine — CHORUS rounds\n");
     testChorusRounds();
+    printf("raid engine — mutations\n");
+    testMutations();
 
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all checks passed",
            failures, failures == 1 ? "" : "s");
