@@ -49,7 +49,7 @@ void raidInit(Renderer& r) {
     rdFaceH = rdH < 16 ? rdH : 16;
     rdStageY = rdH >= 24 ? 16 : -1;
     rdAuto = true; rdLast = 0;
-    fightReset();
+    fightReset();     // also loads the lifetime record (kept outside the engine)
     rdSetBoss(VANTA);
 }
 
@@ -648,7 +648,7 @@ static void tickNull(Renderer& r) {
 
 #define SEC(s) ((uint16_t)((s) * 1000 / RD_TICKMS))
 
-enum FState : uint8_t { ST_IDLE, ST_LOBBY, ST_INTRO, ST_FIGHT, ST_WIN, ST_LOSE, ST_STATS };
+enum FState : uint8_t { ST_IDLE, ST_LOBBY, ST_INTRO, ST_FIGHT, ST_WIN, ST_LOSE, ST_DRAFT, ST_STATS };
 enum FPhase : uint8_t { F_GAP, F_ANNOUNCE, F_TELE, F_RESOLVE, F_TAUNT };
 enum Tele   : uint8_t { T_SWEEP_L, T_SWEEP_R, T_BEAM, T_CHARGE, T_ACID, T_JAM,
                         T_DUST, T_BASH, T_N,
@@ -781,6 +781,28 @@ static uint16_t fMuts;                                  // bitmask over Mut
 static inline bool mutOn(uint8_t m) { return (fMuts >> m) & 1u; }
 static bool brownoutNow();                               // defined next to the dim pass
 
+// Mod cards (§8): per-RUN upgrades drafted between gauntlet fights, 1 of 3.
+// They never persist past a run — that is the whole design stance on progression.
+enum Mod : uint8_t {
+    D_FASTFORGE, D_CAPACITOR, D_SPARECELL, D_ANTENNA,
+    D_PLATING, D_LUCKYFREQ, D_GUSTFAN, D_STEADYHAND, D_N
+};
+static const char* MOD_NAME[D_N] = {
+    "FAST FORGE", "CAPACITOR", "SPARE CELL", "TUNED ANTENNA",
+    "PLATING", "LUCKY FREQ", "GUST FAN", "STEADY HAND",
+};
+static uint16_t fMods;                                   // bitmask over Mod
+static inline bool modOn(uint8_t d) { return (fMods >> d) & 1u; }
+
+// The gauntlet: 3 of the 4 bosses in random order (NULL is appended as the
+// finale when M4 lands), hull restoring +3 between fights, a draft after each.
+#define RUN_LEN 3
+static bool     fRun;                                    // a gauntlet is in progress
+static uint8_t  fRunOrder[RAID_N_BOSS], fRunIdx;
+static uint8_t  fDraft[3];                               // the three offered cards
+static bool     fLucky;                                  // LUCKY FREQ still unspent
+static RaidPersist fPersist;
+
 static const float PARTY_CAD[5] = { 1.0f, 0.5f, 0.65f, 0.8f, 1.0f };
 
 static FState   fState = ST_IDLE;
@@ -851,7 +873,10 @@ static struct {
 #define DD (DIFFS[fDiff])
 
 static bool fightActive() { return fState != ST_IDLE; }
-static void fightReset()  { fState = ST_IDLE; }
+static void fightReset() {
+    fState = ST_IDLE; fRun = false; fMods = 0;
+    raidPersistLoad(fPersist);        // lifetime record lives outside the engine
+}
 
 // One-shot deck feedback. Callers MUST emit the incidental event (hit/bosshit/
 // lanehit) BEFORE calling bossDamage()/hullHit(), because those may in turn
@@ -866,7 +891,8 @@ static void fEvent(const char* n) {
 // Max hull for this fight (difficulty baseline + the assist governor's bonus).
 // The 8-segment stage bar and the deck's LED row both scale to it.
 static int hullMax() {
-    int m = DIFFS[fDiff].hull + (fAssist ? 2 : 0) - (mutOn(M_THIN) ? 2 : 0);
+    int m = DIFFS[fDiff].hull + (fAssist ? 2 : 0) - (mutOn(M_THIN) ? 2 : 0)
+          + (modOn(D_PLATING) ? 1 : 0);              // PLATING: +1 max hull
     return m < 1 ? 1 : m;
 }
 
@@ -958,9 +984,42 @@ static uint8_t drawTele() {
     return T_BEAM;
 }
 
+// --- the gauntlet (§8) ------------------------------------------------------
+// A run is 3 of the 4 bosses in random order. NULL becomes the finale in M4:
+// append it to the order and raise RUN_LEN — nothing else here changes.
+static void buildRun() {
+    for (uint8_t i = 0; i < RAID_N_BOSS; i++) fRunOrder[i] = i;
+    for (int8_t i = RAID_N_BOSS - 1; i > 0; i--) {           // shuffle the draft
+        uint8_t j = (uint8_t)(esp_random() % (i + 1));
+        uint8_t t = fRunOrder[i]; fRunOrder[i] = fRunOrder[j]; fRunOrder[j] = t;
+    }
+    fRunIdx = 0;
+}
+// Offer three distinct cards the run hasn't already taken.
+static void dealDraft() {
+    uint8_t pool[D_N], n = 0;
+    for (uint8_t d = 0; d < D_N; d++) if (!modOn(d)) pool[n++] = d;
+    for (uint8_t i = 0; i < 3; i++) {
+        if (n == 0) { fDraft[i] = D_N; continue; }            // run out: empty slot
+        uint8_t k = (uint8_t)(esp_random() % n);
+        fDraft[i] = pool[k];
+        pool[k] = pool[--n];
+    }
+}
+
 static void toWin() {
     fState = ST_WIN; fPT = 0; fStats.res = "win";
     fWipeStreak[fBoss] = 0;
+    // Persistence (§8): a clear counts per boss x SIM LEVEL, plus lifetime.
+    if (fBoss < RAID_N_BOSS && fDiff < RAID_N_DIFF &&
+        fPersist.wins[fBoss][fDiff] < 65535) fPersist.wins[fBoss][fDiff]++;
+    fPersist.clears++;
+    if (fRun) {
+        uint8_t depth = (uint8_t)(fRunIdx + 1);
+        if (depth > fPersist.bestDepth) fPersist.bestDepth = depth;
+        if (depth >= RUN_LEN) fPersist.nullUnlocked = 1;      // the finale opens
+    }
+    raidPersistSave(fPersist);
     rdBoss = FB.anatomy; rdAuto = false;
     rdReset(ANIM_N[rdBoss] - 1);                   // the boss's own death program
     fEvent("win");
@@ -968,6 +1027,9 @@ static void toWin() {
 static void toLose() {
     fState = ST_LOSE; fPT = 0; fStats.res = "wipe";
     if (fWipeStreak[fBoss] < 250) fWipeStreak[fBoss]++;
+    fPersist.wipes++;
+    raidPersistSave(fPersist);
+    fRun = false;                                    // a wipe ends the run (§8)
     fEvent("wipe");
 }
 
@@ -1148,8 +1210,11 @@ static void fightBegin() {
     fAssist = fDiff <= 1 && fWipeStreak[fBoss] >= 2;     // the governor (§6)
 
     // Roll this fight's mutations (§7.4) — distinct draws from the pool.
+    fPersist.fights++;
+    // The gauntlet always rolls mutations (§7.4); Quick Fight only at D3+.
+    uint8_t nMut = fRun ? (DD.muts < 1 ? 1 : DD.muts) : DD.muts;
     fMuts = 0;
-    for (uint8_t i = 0, guard = 0; i < DD.muts && guard < 64; guard++) {
+    for (uint8_t i = 0, guard = 0; i < nMut && guard < 64; guard++) {
         uint8_t m = esp_random() % M_N;
         if (mutOn(m)) continue;                          // no duplicates
         fMuts |= (uint16_t)(1u << m);
@@ -1166,13 +1231,25 @@ static void fightBegin() {
     fAim = 0;
     fLead = MD.lead == LEAD_BOTTOM ? (uint8_t)(FB.heads - 1) : 0;
     fRoundN = fRoundIdx = 0; fAnnounce = 0;
-    fHull = DD.hull + (fAssist ? 2 : 0) - (mutOn(M_THIN) ? 2 : 0);
-    if (fHull < 1) fHull = 1;
+    // Gauntlet: hull carries between fights, restoring +3 up to the cap (§8).
+    if (fRun && fRunIdx > 0) {
+        int h = fHull + 3;
+        if (h > hullMax()) h = hullMax();
+        fHull = (int8_t)h;
+    } else {
+        fHull = (int8_t)hullMax();
+    }
     fPhaseNo = 1; fPhase = F_GAP;
     fSide = 0; fDial = 0; fOver = false; fOk = false;
     fCrank = 0; fShells = 0; fPing = 0; fHeavy = 0;
     fDudGen = fDudPing = fDudHeavy = false;
-    if (fParty >= 2) { if (FB.armored) fPing = 1; else fShells = 1; }   // one pre-load
+    if (fParty >= 2) {                                // one shell pre-loaded for flow
+        if (FB.armored) fPing = 1; else fShells = 1;
+        if (modOn(D_SPARECELL)) {                     // SPARE CELL: and a spare
+            if (FB.armored) fHeavy = 1; else fShells = 2;
+        }
+    }
+    fLucky = modOn(D_LUCKYFREQ);                      // one auto-correct per fight
     fVuln = 0; fEnrage = -1; fVisor = 0; fFakeLift = false;
     fBash = 0; fBashRemap = 0;
     fFeint = false; fFeintFx = 0; fShlCd = 0; fDust = 0;
@@ -1216,14 +1293,33 @@ static bool fightInput(uint8_t p, char k) {
         if (k == 'B') { fBoss = 2; return true; }
         if (k == 'C') { fBoss = 3; return true; }
         if (k == 'D') { fDiff = (fDiff + 1) % 4; return true; }
-        if (k == 'G') { fightBegin(); return true; }
+        if (k == 'G') { fRun = false; fMods = 0; fightBegin(); return true; }
+        if (k == 'R') {                                  // start a GAUNTLET run
+            fRun = true; fMods = 0;
+            buildRun();
+            fBoss = fRunOrder[0];
+            fightBegin();
+            fEvent("runstart");
+            return true;
+        }
         if (k == 'Q') { fState = ST_IDLE; rdAuto = true; rdSetBoss(VANTA); return true; }
         return true;
     case ST_INTRO:
         if (k == 'Q') { fState = ST_LOBBY; return true; }
         return true;
+    case ST_DRAFT:                                       // between gauntlet fights
+        if (k >= '1' && k <= '3') {
+            uint8_t pick = fDraft[k - '1'];
+            if (pick < D_N) { fMods |= (uint16_t)(1u << pick); fEvent("mod"); }
+            fRunIdx++;
+            fBoss = fRunOrder[fRunIdx];
+            fightBegin();                                // hull carries over (§8)
+            return true;
+        }
+        if (k == 'Q') { fRun = false; fState = ST_STATS; return true; }
+        return true;
     case ST_STATS:
-        if (k == 'G') { fightBegin(); return true; }
+        if (k == 'G') { fRun = false; fMods = 0; fightBegin(); return true; }
         if (k == 'Q') { fState = ST_LOBBY; return true; }
         return true;
     case ST_WIN: case ST_LOSE:
@@ -1278,7 +1374,9 @@ static bool fightInput(uint8_t p, char k) {
                     } else { fAcid = -1; fEvent("wiped"); }
                 }
             } else if (fDust > 0) {
-                if (--fDust == 0) fEvent("dustclear");
+                if (modOn(D_GUSTFAN)) fDust = 0;      // GUST FAN: one pass clears it
+                else                  fDust--;
+                if (fDust == 0) fEvent("dustclear");
             }
             return true;
         case 'a': case 'b': case 'c': case 'd':
@@ -1628,7 +1726,8 @@ static void fightTick(Renderer& r) {
             } else if (fType == T_BASH) {
                 fBash = SEC(2); fOk = true;
                 // D4+: the impact actually rearranges the decks for ~2 s.
-                fBashRemap = DD.remap ? (uint8_t)(1 + esp_random() % 3) : 0;
+                fBashRemap = (DD.remap && !modOn(D_STEADYHAND))
+                           ? (uint8_t)(1 + esp_random() % 3) : 0;
                 fEvent("bash");
             } else if (fType == T_RIP) {
                 fOk = fSide == fRipSide;
@@ -1642,7 +1741,13 @@ static void fightTick(Renderer& r) {
                          if (fState != ST_FIGHT) return; }
             } else {
                 if      (fType <= T_SWEEP_R) fOk = fSide == (fType == T_SWEEP_L ? 1 : 2);
-                else if (fType == T_BEAM)    fOk = fDial == fFreq;
+                else if (fType == T_BEAM) {
+                    fOk = fDial == fFreq;
+                    if (!fOk && fLucky) {             // LUCKY FREQ, spent here
+                        fLucky = false; fOk = true; fDial = fFreq;
+                        fEvent("lucky");
+                    }
+                }
                 else                         fOk = fOver;
                 if (fOk) {
                     fStats.blk++;
@@ -1713,6 +1818,28 @@ static void fightTick(Renderer& r) {
     fightDrawBars(r);
 }
 
+// Between fights: the panel offers three numbered cards; any deck picks with
+// 1-3. The card NAMES live on the decks — they are loadout text, not a
+// telegraph, so putting them on a 16px panel would only make them unreadable.
+static void draftTick(Renderer& r) {
+    for (uint8_t i = 0; i < 3; i++) {
+        if (fDraft[i] >= D_N) continue;
+        int x = 1 + i * 5;
+        bool blink = ((rdT / 6) % 3) == i;
+        for (int y = 3; y <= 9; y++) {                  // card outline
+            r.setPixel(x, y, blink ? 255 : 90);
+            r.setPixel(x + 3, y, blink ? 255 : 90);
+        }
+        for (int k = 0; k <= 3; k++) {
+            r.setPixel(x + k, 3, blink ? 255 : 90);
+            r.setPixel(x + k, 9, blink ? 255 : 90);
+        }
+        r.drawChar(x + 1, 5, (char)('1' + i), blink ? 255 : 200);
+    }
+    for (uint8_t i = 0; i < RUN_LEN; i++)               // run depth along the base
+        r.setPixel(4 + i * 3, rdH - 2, i <= fRunIdx ? 255 : 40);
+}
+
 static void statsTick(Renderer& r) {
     bool win = fStats.res && strcmp(fStats.res, "win") == 0;
     const char* v = win ? "GG" : "KO";
@@ -1750,6 +1877,8 @@ size_t raidNet(char* buf, size_t cap) {
         "\"heads\":%u,\"headHp\":[%d,%d,%d],\"headMax\":%d,\"aim\":%d,\"lead\":%d,"
         "\"roundN\":%u,\"roundIdx\":%u,\"announce\":%u,"
         "\"muts\":%u,\"dial\":%u,\"acid2\":%d,\"brownout\":%d,"
+        "\"run\":%d,\"runIdx\":%u,\"runLen\":%u,\"mods\":%u,"
+        "\"draft\":[%d,%d,%d],\"best\":%u,\"clears\":%lu,\"wipes\":%lu,"
         "\"hint\":%d,\"paused\":%d,\"ev\":%lu,\"evn\":\"%s\"",
         SN[fState], FB.name, DD.name,
         fParty, MD.name, fAssist ? 1 : 0, fPhaseNo,
@@ -1785,6 +1914,14 @@ size_t raidNet(char* buf, size_t cap) {
         // now that LOOSE WIRING drifts it, and STICKY ACID needs a second
         // downed deck to be visible.
         (unsigned)fMuts, fDial, (int)fAcid2, brownoutNow() ? 1 : 0,
+        // Gauntlet: where the run is, what the team is holding, and what the
+        // draft is offering. Card NAMES live in the deck (loadout text, not a
+        // telegraph) so only indices travel.
+        fRun ? 1 : 0, fRunIdx, (unsigned)RUN_LEN, (unsigned)fMods,
+        fDraft[0] < D_N ? (int)fDraft[0] : -1,
+        fDraft[1] < D_N ? (int)fDraft[1] : -1,
+        fDraft[2] < D_N ? (int)fDraft[2] : -1,
+        fPersist.bestDepth, (unsigned long)fPersist.clears, (unsigned long)fPersist.wipes,
         hint, (int)fPausedRole,
         (unsigned long)fEv, fEvName);
     if (n < 0 || (size_t)n >= cap) return 0;
@@ -1841,7 +1978,17 @@ bool raidTick(Renderer& r, uint32_t now) {
                 case BULWARK: tickBulwark(r); break;
                 default:      tickVanta(r);   break;
             }
-            if (fPT > CUT[rdBoss < 5 ? rdBoss : 0]) { fState = ST_STATS; fPT = 0; fEvent("stats"); }
+            if (fPT > CUT[rdBoss < 5 ? rdBoss : 0]) {
+                fPT = 0;
+                if (fRun && fRunIdx + 1 < RUN_LEN) {         // another boss waits
+                    dealDraft();
+                    fState = ST_DRAFT; fEvent("draft");
+                } else {
+                    if (fRun) fEvent("runclear");            // the whole gauntlet
+                    fRun = false;
+                    fState = ST_STATS; fEvent("stats");
+                }
+            }
             break;
         }
         case ST_LOSE:
@@ -1859,6 +2006,7 @@ bool raidTick(Renderer& r, uint32_t now) {
             }
             if (fPT > 40) { fState = ST_STATS; fPT = 0; fEvent("stats"); }
             break;
+        case ST_DRAFT: draftTick(r); break;
         case ST_STATS: statsTick(r); break;
         default: break;
         }

@@ -47,6 +47,23 @@ const MUT_NAMES = ['BROWNOUT', 'CROSSWIRE', 'LOOSE WIRING', 'OVERTUNED',
 const MUT = { BROWNOUT:0, CROSSWIRE:1, LOOSE:2, OVERTUNED:3, MOTESTORM:4,
               ECHO:5, CHEAP:6, THIN:7, STICKY:8, LONG:9 };
 const mutOn = (m) => !!(snap && ((snap.muts >> m) & 1));
+/* Mod cards mirror the device's Mod enum order (§8). Per-RUN only — they never
+   persist, which is the design's whole stance on progression. */
+const MOD_NAMES = ['FAST FORGE', 'CAPACITOR', 'SPARE CELL', 'TUNED ANTENNA',
+                   'PLATING', 'LUCKY FREQ', 'GUST FAN', 'STEADY HAND'];
+const MOD_BLURB = [
+  'forge traces one node shorter',
+  'overcharge cooldown −2 s',
+  'start each fight with a spare shell loaded',
+  'scan cooldown −3 s',
+  '+1 max hull',
+  'once per fight a wrong frequency auto-corrects',
+  "the medic's wipe clears dust in one pass",
+  'bash can no longer displace your controls',
+];
+const MOD = { FASTFORGE:0, CAPACITOR:1, SPARECELL:2, ANTENNA:3,
+              PLATING:4, LUCKYFREQ:5, GUSTFAN:6, STEADYHAND:7 };
+const modOn = (d) => !!(snap && ((snap.mods >> d) & 1));
 const isChorus = () => snap && snap.heads > 1;
 
 /* Deck bundles (§4/§5): consoles never disappear, they consolidate. */
@@ -180,9 +197,59 @@ document.querySelectorAll('#party-strip .segmented-btn').forEach(b =>
 document.querySelectorAll('#fboss-strip .segmented-btn').forEach(b =>
   b.onpointerdown = (e) => { e.preventDefault(); if (st() === 'lobby') key(b.dataset.b); });
 $('diff-cycle').onclick = () => { if (st() === 'lobby') key('D'); };
+$('run-start').onclick   = () => { if (st() === 'lobby') key('R'); };
 
 const ST_LABEL = { idle: 'standby', lobby: 'lobby', intro: 'incoming…',
-                   fight: 'FIGHT', win: 'victory', lose: 'wiped', stats: 'debrief' };
+                   fight: 'FIGHT', win: 'victory', lose: 'wiped',
+                   draft: 'draft', stats: 'debrief' };
+
+/* The draft: three cards, any deck may pick. Card text is loadout, not a
+   telegraph, so it belongs on the decks where it can actually be read. */
+let draftShown = '';
+function paintDraft(s) {
+  const on = s.st === 'draft';
+  $('draft-card').hidden = !on;
+  if (!on) { draftShown = ''; return; }
+  const sig = (s.draft || []).join(',');
+  if (sig === draftShown) return;
+  draftShown = sig;
+  const grid = $('draft-grid');
+  grid.innerHTML = '';
+  (s.draft || []).forEach((d, i) => {
+    if (d < 0) return;
+    const b = document.createElement('button');
+    b.className = 'btn-secondary card';
+    b.innerHTML = `<b>${MOD_NAMES[d]}</b><span>${MOD_BLURB[d]}</span>`;
+    b.onclick = () => key(String(i + 1));
+    grid.appendChild(b);
+  });
+}
+
+/* Run progress + the mods the team is holding. */
+let modsShown = -1;
+function paintRun(s) {
+  const strip = $('run-strip');
+  strip.hidden = !s.run;
+  if (s.run) {
+    let html = '<span>run</span>';
+    for (let i = 0; i < s.runLen; i++)
+      html += `<span class="leg ${i < s.runIdx ? 'done' : i === s.runIdx ? 'now' : ''}"></span>`;
+    html += `<span>${s.runIdx + 1}/${s.runLen}</span>`;
+    strip.innerHTML = html;
+  }
+  if (s.mods !== modsShown) { modsShown = s.mods; refreshForgeNodes(); }
+  const mods = $('mod-strip');
+  mods.hidden = !s.mods;
+  if (s.mods) {
+    mods.innerHTML = '';
+    MOD_NAMES.forEach((n, i) => {
+      if (!((s.mods >> i) & 1)) return;
+      const c = document.createElement('span');
+      c.className = 'mod'; c.textContent = n;
+      mods.appendChild(c);
+    });
+  }
+}
 
 function renderFlow() {
   const s = st();
@@ -191,6 +258,7 @@ function renderFlow() {
   // freq-dial keys inside the fight flow, and the panel is no longer showcasing.
   $('showcase-card').style.display = s === 'idle' ? '' : 'none';
   $('lobby-ui').hidden = s !== 'lobby';
+  $('run-start').hidden = s !== 'lobby';
   $('fight-start').hidden = !(s === 'idle' || s === 'lobby');
   $('fight-start').textContent = s === 'idle' ? 'ENTER LOBBY' : 'START FIGHT';
   $('fight-stop').hidden = s === 'idle';
@@ -211,6 +279,8 @@ function renderFlow() {
     $('shl-cd-alert').hidden = true; $('fire-ping').hidden = true;
     $('p-ping').hidden = true;
     $('mock-load').hidden = false;
+    $('run-strip').hidden = true; $('mod-strip').hidden = true;
+    $('draft-card').hidden = true;
     $('cockpit').classList.remove('bashing');
     $('hp-single').hidden = false; $('head-bars').hidden = true;
     $('round-strip').hidden = true; $('aim-lbl').hidden = true;
@@ -362,7 +432,15 @@ function applyCrosswire(on) {
 let cheapShells = false;
 function applyCheapShells(on) {
   cheapShells = !!on;
-  $('node-4').style.display = cheapShells ? 'none' : '';
+  refreshForgeNodes();
+}
+/* Show only as many trace nodes as the current loadout requires. */
+function refreshForgeNodes() {
+  const n = forgeLen();
+  [1, 2, 3, 4].forEach(i => {
+    const el = $('node-' + i);
+    if (el) el.style.display = i <= n ? '' : 'none';
+  });
   $('forge-cheap').hidden = !cheapShells;
   resetForge();
 }
@@ -465,6 +543,8 @@ function handleSnap(s) {
   paintRound(s);
   paintAim(s);
   paintMuts(s);
+  paintDraft(s);
+  paintRun(s);
 
   /* solo pilot: the alert diamond points at what needs you */
   paintPilot(s);
@@ -539,7 +619,8 @@ holdFx(overBtn,
     clearInterval(overT);
     if (overPct >= 100) {
       capFill.style.transition = 'none'; capFill.style.width = '0%';
-      requestAnimationFrame(() => { capFill.style.transition = 'width 6s linear'; capFill.style.width = '100%'; });
+      const secs = modOn(MOD.CAPACITOR) ? 4 : 6;      // CAPACITOR: −2 s cooldown
+      requestAnimationFrame(() => { capFill.style.transition = `width ${secs}s linear`; capFill.style.width = '100%'; });
     }
     overPct = 0; overFill.style.width = '0%';
     delete overBtn.dataset.armed;
@@ -703,7 +784,7 @@ holdFx(scanBtn, () => {
   scanning = true; scanBtn.disabled = true;
   const t0 = performance.now();
   (function arc() {
-    const p = Math.min(1, (performance.now() - t0) / 8000);
+    const p = Math.min(1, (performance.now() - t0) / (modOn(MOD.ANTENNA) ? 5000 : 8000));
     scanArc.style.background = `conic-gradient(var(--accent) ${p * 360}deg, transparent 0deg)`;
     if (p < 1) requestAnimationFrame(arc);
     else { scanning = false; scanBtn.disabled = false; scanArc.style.background = ''; }
@@ -733,7 +814,12 @@ paintCodebook(null);
    turns sloppy shells into duds (§6 D4) — a clean trace is always safe, so
    this is a skill tax on panicking, not a dice roll. */
 const FORGE_CLEAN_MS = 2500;                    // slower than this = fumbled
-const forgeLen = () => (cheapShells ? 3 : 4);   // CHEAP SHELLS: one node shorter
+const forgeLen = () => {                        // CHEAP SHELLS / FAST FORGE
+  let n = 4;
+  if (cheapShells) n--;
+  if (modOn(MOD.FASTFORGE)) n--;
+  return n < 2 ? 2 : n;
+};
 let forgeNext = 1, forgeSlips = 0, forgeStart = 0;
 const sendBtn = $('send-shell');
 function forgeSloppy() {

@@ -19,6 +19,58 @@
 #include "effects.h"
 #include "games.h"
 #include "zones.h"
+#include "raid.h"
+
+// --- Raid 16 persistence (docs/raid16.md §8) ---
+// The fight engine stays free of file I/O so it can be compiled and driven on
+// a host (esp32/test/); the firmware supplies the storage here. Tiny and
+// rewritten only on a clear or a wipe, so it costs LittleFS almost nothing.
+#define RAID_FILE "/raid.json"
+
+void raidPersistLoad(RaidPersist& p) {
+    memset(&p, 0, sizeof(p));
+    File f = LittleFS.open(RAID_FILE, "r");
+    if (!f) return;                                  // no record yet — all zeroes
+    StaticJsonDocument<768> doc;
+    if (deserializeJson(doc, f)) { f.close(); return; }
+    f.close();
+    JsonArray w = doc["wins"];
+    if (!w.isNull()) {
+        uint8_t i = 0;
+        for (JsonArray row : w) {
+            if (i >= RAID_N_BOSS) break;
+            uint8_t j = 0;
+            for (JsonVariant v : row) {
+                if (j >= RAID_N_DIFF) break;
+                p.wins[i][j++] = v | 0;
+            }
+            i++;
+        }
+    }
+    p.bestDepth     = doc["best"]   | 0;
+    p.nullUnlocked  = doc["null"]   | 0;
+    p.fights        = doc["fights"] | 0;
+    p.clears        = doc["clears"] | 0;
+    p.wipes         = doc["wipes"]  | 0;
+}
+
+void raidPersistSave(const RaidPersist& p) {
+    StaticJsonDocument<768> doc;
+    JsonArray w = doc.createNestedArray("wins");
+    for (uint8_t i = 0; i < RAID_N_BOSS; i++) {
+        JsonArray row = w.createNestedArray();
+        for (uint8_t j = 0; j < RAID_N_DIFF; j++) row.add(p.wins[i][j]);
+    }
+    doc["best"]   = p.bestDepth;
+    doc["null"]   = p.nullUnlocked;
+    doc["fights"] = p.fights;
+    doc["clears"] = p.clears;
+    doc["wipes"]  = p.wipes;
+    File f = LittleFS.open(RAID_FILE, "w");
+    if (!f) return;
+    serializeJson(doc, f);
+    f.close();
+}
 
 // --- Globals ---
 static AppConfig    cfg;

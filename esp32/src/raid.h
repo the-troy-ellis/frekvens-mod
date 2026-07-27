@@ -16,6 +16,23 @@ class Renderer;
 // Auto-tours the current boss's animation set until a manual selection.
 // Fight-flow keys are documented at the engine in raid.cpp.
 
+// --- persistence (§8) -------------------------------------------------------
+// Tiny, and deliberately NOT implemented inside the engine: raid.cpp is pure
+// logic so it can be compiled and driven on a host (esp32/test/). The firmware
+// backs these with LittleFS in main.cpp; the test backs them with memory.
+// No accounts, no meta-grind — mods are per-run only, by design.
+#define RAID_N_BOSS 4        // VANTA, MOTH, CHORUS, BULWARK (NULL joins at M4)
+#define RAID_N_DIFF 4
+struct RaidPersist {
+    uint16_t wins[RAID_N_BOSS][RAID_N_DIFF];   // clears per boss x SIM LEVEL
+    uint8_t  bestDepth;                        // deepest gauntlet reached
+    uint8_t  nullUnlocked;                     // set by the first gauntlet clear
+    uint32_t fights, clears, wipes;            // lifetime, for the stats screen
+};
+// Implemented by the host application (firmware: LittleFS; test: memory).
+void raidPersistLoad(RaidPersist& p);
+void raidPersistSave(const RaidPersist& p);
+
 void raidInit(Renderer& r);
 void raidInput(uint8_t player, char key, bool pressed);
 bool raidTick(Renderer& r, uint32_t nowMs);

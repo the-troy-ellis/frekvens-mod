@@ -30,6 +30,15 @@ inspect its file statics directly.
   resumes when the deck returns.
 - **Assist governor** — arms after two consecutive wipes at D1–D2, grants
   +2 hull, and never arms at NIGHTMARE.
+- **Sloppy-forge duds / BASH displacement** — the two D4 mechanics: a clean
+  forge never duds at any difficulty, and controls displace only at D4.
+- **CHORUS** — per-head pools, aim-directed damage, kill-driven phases,
+  harmonize tightening windows, and rounds capped by party size.
+- **Mutations** — roll counts per difficulty plus a case per card asserting
+  the effect it advertises.
+- **Gauntlet + persistence** — drafted boss order, the 1-of-3 card draft,
+  hull carrying with its +3 restore, a wipe ending the run, and the record
+  surviving a restart while mods explicitly do not.
 
 Two of these are regression pins for bugs this harness found: terminal/phase
 events were being clobbered by the incidental damage event that caused them, and

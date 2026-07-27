@@ -483,7 +483,23 @@ WS ~10 KB/s. The cost is still **surface area**, not resources.
     Shield's OVERCHARGE onto the Gunner's deck and the Gunner's FIRE onto
     the Shield's — the controls keep their meaning and their owning role,
     they just live somewhere else, so the shouting doubles.)*
-  - Gauntlet structure + mod drafts, persistence — still to do.
+  - **Gauntlet + mod drafts + persistence** ✅ *(shipped: a run is 3 of the
+    4 bosses in a shuffled order — NULL becomes the finale in M4 by
+    appending it to the order and raising RUN_LEN, nothing else changes.
+    Hull carries between fights restoring +3 up to the cap, and the
+    gauntlet always rolls mutations regardless of SIM LEVEL. After each
+    clear the panel offers three numbered cards and any deck picks with
+    1-3; the card NAMES live on the decks, because loadout text is not a
+    telegraph and a 16px panel would only make it unreadable. All eight
+    mod cards work — PLATING, SPARE CELL, LUCKY FREQ, GUST FAN and STEADY
+    HAND on the device, FAST FORGE, CAPACITOR and TUNED ANTENNA on the
+    decks. A wipe ends the run. Persistence is deliberately kept OUT of
+    the engine so raid.cpp stays host-testable: raid.h declares
+    raidPersistLoad/Save, the firmware backs them with LittleFS
+    (/raid.json) and the test backs them with memory. Stored: clears per
+    boss × SIM LEVEL, best gauntlet depth, the NULL unlock flag, and
+    lifetime fights/clears/wipes. Mods are per-run only and never
+    persist — that is the design's whole stance on progression.)*
   *Replayable.*
 - **M4 — the finale + juice.** NULL (all four corruptions, dialect theft,
   false wipe), D5, adaptive drift, bespoke deaths for all, HA audio events,

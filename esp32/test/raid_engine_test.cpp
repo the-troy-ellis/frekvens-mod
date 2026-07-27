@@ -33,6 +33,15 @@ static uint32_t g_millis = 0;
 unsigned long millis() { return g_millis; }
 
 #include "../src/games.h"   // GAME_NET_BUF — the snapshot buffer contract
+#include "../src/raid.h"
+
+// The engine keeps persistence outside itself (the firmware backs it with
+// LittleFS); the test backs it with memory so runs stay hermetic.
+static RaidPersist g_store;
+static int g_saves = 0;
+void raidPersistLoad(RaidPersist& p) { p = g_store; }
+void raidPersistSave(const RaidPersist& p) { g_store = p; g_saves++; }
+
 #include "../src/raid.cpp"
 
 // A canvas of `panels` stacked 16x16 panels, matching the real chain layout.
@@ -576,6 +585,105 @@ static void testMutations() {
     (void)baseHp;
 }
 
+// 11. The gauntlet (§8): a drafted run of bosses, a mod card between fights,
+//     hull carrying forward, and a wipe ending the run.
+static void testGauntlet() {
+    Renderer& r = *makeCanvas(2);
+    R = &r;
+    memset(&g_store, 0, sizeof(g_store));
+    raidInit(r);
+
+    // Enter the lobby and start a run.
+    fState = ST_IDLE;
+    raidInput(0, 'G', true);
+    raidInput(0, '4', true);
+    heartbeatAll();
+    fDiff = 1;
+    raidInput(0, 'R', true);                       // start the gauntlet
+    for (int i = 0; i < 400 && fState == ST_INTRO; i++) step(1);
+
+    check(fRun, "the run is active");
+    check(fRunIdx == 0, "the run starts at the first boss");
+    bool distinct = true;
+    for (int i = 0; i < RUN_LEN; i++)
+      for (int j = i + 1; j < RUN_LEN; j++)
+        if (fRunOrder[i] == fRunOrder[j]) distinct = false;
+    check(distinct, "the drafted boss order has no repeats");
+    check(fMuts != 0, "the gauntlet always rolls mutations, even at FIELD");
+
+    // Kill boss 1 -> the draft.
+    for (int t = 0; t < 3000 && fState == ST_FIGHT; t++) {
+        fCrank = 100; fShells = 2; fHeavy = 1; fPing = 1;
+        raidInput(1, 'F', true);
+        if (!headAlive(fAim)) raidInput(1, 'z', true);
+        g_millis += RD_TICKMS; raidTick(r, g_millis); heartbeatAll();
+    }
+    for (int t = 0; t < 400 && fState == ST_WIN; t++) {
+        g_millis += RD_TICKMS; raidTick(r, g_millis); heartbeatAll();
+    }
+    check(fState == ST_DRAFT, "clearing a boss mid-run opens the draft");
+    int offered = 0;
+    for (int i = 0; i < 3; i++) if (fDraft[i] < D_N) offered++;
+    check(offered == 3, "the draft offers three cards");
+    check(fDraft[0] != fDraft[1] && fDraft[1] != fDraft[2] && fDraft[0] != fDraft[2],
+          "the three offered cards are distinct");
+
+    // Take one, hurt the team, and check hull carries with the +3 restore.
+    uint8_t want = fDraft[1];
+    fHull = 3;
+    raidInput(0, '2', true);                       // pick card 2
+    for (int i = 0; i < 400 && fState == ST_INTRO; i++) step(1);
+    check(modOn(want), "the drafted card is held for the run");
+    check(fRunIdx == 1, "the run advances to the next boss");
+    check(fHull == 6, "hull carries between fights, restoring +3");
+    check(fBoss == fRunOrder[1], "the next boss comes from the drafted order");
+
+    // A wipe ends the run.
+    for (int t = 0; t < 9000 && fState == ST_FIGHT; t++) {
+        g_millis += RD_TICKMS; raidTick(r, g_millis); heartbeatAll();
+    }
+    check(fStats.res && strcmp(fStats.res, "wipe") == 0, "passive play wipes");
+    check(!fRun, "a wipe ends the gauntlet run");
+    leaveFight();
+}
+
+// 12. Persistence (§8): clears, wipes and best depth survive across sessions,
+//     and mods explicitly do NOT (per-run only, by design).
+static void testPersistence() {
+    Renderer& r = *makeCanvas(2);
+    R = &r;
+    memset(&g_store, 0, sizeof(g_store));
+    raidInit(r);
+
+    uint32_t clears0 = g_store.clears, wipes0 = g_store.wipes;
+
+    // A clear at a known boss/difficulty.
+    startFight('V', 4, 1);
+    for (int t = 0; t < 3000 && fState == ST_FIGHT; t++) {
+        fCrank = 100; fShells = 2;
+        raidInput(1, 'F', true);
+        g_millis += RD_TICKMS; raidTick(r, g_millis); heartbeatAll();
+    }
+    check(g_store.clears == clears0 + 1, "a clear is recorded to storage");
+    check(g_store.wins[0][1] == 1, "the win lands in the right boss x difficulty slot");
+    leaveFight();
+
+    // A wipe.
+    startFight('V', 4, 1);
+    for (int t = 0; t < 9000 && fState == ST_FIGHT; t++) {
+        g_millis += RD_TICKMS; raidTick(r, g_millis); heartbeatAll();
+    }
+    check(g_store.wipes == wipes0 + 1, "a wipe is recorded to storage");
+    leaveFight();
+
+    // Survives a cold restart of the game.
+    uint32_t clears = g_store.clears;
+    raidInit(r);                                   // as if the game were re-started
+    check(fPersist.clears == clears, "the record reloads on restart");
+    check(fMods == 0, "mods do NOT persist — they are per-run only");
+    check(!fRun, "no run is in progress after a restart");
+}
+
 int main() {
     printf("raid engine — invariant sweep\n");
     testSweep(1);                           // 16x16: no stage row (decks carry the bars)
@@ -598,6 +706,10 @@ int main() {
     testChorusRounds();
     printf("raid engine — mutations\n");
     testMutations();
+    printf("raid engine — the gauntlet\n");
+    testGauntlet();
+    printf("raid engine — persistence\n");
+    testPersistence();
 
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all checks passed",
            failures, failures == 1 ? "" : "s");
