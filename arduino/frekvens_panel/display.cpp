@@ -43,6 +43,18 @@ static void spi_send_plane(const uint8_t* src) {
 void display_init() {
     // SPI0 default pins on the 14-pin part: MOSI=PA1, MISO=PA2, SCK=PA3, SS=PA4.
     // LATCH = PA7 (GPIO). /OE = PA5 (driven by TCB0 PWM, see below).
+    //
+    // ORDER IS LOAD-BEARING: /OE must be driven HIGH (outputs disabled) BEFORE
+    // PA5 becomes an output. PORTx.OUT resets to 0, so setting DIR first would
+    // drive /OE low and enable the SCT2024 outputs while their shift registers
+    // still hold power-up garbage — lighting an arbitrary subset of all 256
+    // LEDs at full current for the ~1-3 ms it takes to reach the first latch
+    // (this init, plus uart_init()'s CRC table build). On a cold start that
+    // inrush drags the still-ramping 3.3V rail back under the BOD threshold,
+    // the chip resets, /OE floats, the rail recovers, and it loops forever —
+    // which is exactly the "won't start cold, starts fine on a quick replug"
+    // failure (a warm replug rides through on the supply's charged bulk caps).
+    PORTA.OUTSET  = PIN5_bm;        // /OE high = outputs DISABLED, before DIR
     PORTA.DIR    |= PIN1_bm | PIN3_bm | PIN5_bm | PIN7_bm;
     PORTA.OUTCLR  = PIN7_bm;        // LATCH idle low
 
@@ -50,6 +62,14 @@ void display_init() {
     SPI0.CTRLA = SPI_DORD_bm | SPI_ENABLE_bm | SPI_MASTER_bm
                | SPI_CLK2X_bm | SPI_PRESC_DIV4_gc;
     SPI0.CTRLB = SPI_SSD_bm | SPI_MODE_0_gc;
+
+    // Clock a known-zero frame into the drivers and latch it while /OE is still
+    // disabled, so the outputs are guaranteed dark before they are ever enabled.
+    // One plane is a full 256-output register load.
+    memset(buf, 0, sizeof(buf));
+    front_buf = buf[0];
+    tick      = 0;
+    spi_send_plane(buf[0]);
 
     // --- Global brightness via hardware PWM on /OE (PA5 = TCB0 WO) ---
     // TCB0 8-bit PWM: period = CCMPL+1 = 256 ticks at CLK_PER (10 MHz) = ~39 kHz.
@@ -65,10 +85,6 @@ void display_init() {
     TCB0.INTCTRL = 0;                                    // no interrupt (in case the
                                                         //   Arduino core used TCB0 for millis)
     TCB0.CTRLA   = TCB_ENABLE_bm;                        // CLKSEL=0 → CLK_PER, enable
-
-    memset(buf, 0, sizeof(buf));
-    front_buf = buf[0];
-    tick      = 0;
 }
 
 void display_scan() {

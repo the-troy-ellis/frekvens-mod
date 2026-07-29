@@ -30,6 +30,19 @@ remap, because the SPI alternate mapping targets a PORTC that the 14-pin package
 the panel's /OE line. A ~78 kHz PWM on this pin sets global brightness while the
 bit-plane scan keeps full per-pixel grayscale.
 
+**Fit a 10 kΩ pull-up from /OE to 3.3V.** /OE is active-low, so a floating line
+means "outputs enabled". Between power-on and the firmware's first instruction
+the ATtiny cannot drive anything — POR, the BOD hold, and the 64 ms startup
+delay all leave PA5 high-impedance — and during that window the SCT2024 shift
+registers still hold power-up garbage. Without the pull-up an arbitrary subset
+of all 256 LEDs switches on at full current for 60+ ms while the supply is
+still ramping, which drags the rail back under the BOD threshold and puts the
+chip in a reset loop: the panel then refuses to cold-start but comes up fine on
+a quick unplug/replug (the supply's bulk caps carry it through). The pull-up
+holds the drivers blanked until the firmware takes over; `display_init()`
+covers the window from its first instruction by raising /OE before PA5 becomes
+an output and latching a zero frame before enabling the PWM.
+
 The ATtiny1614 draws ~6 mA at 20 MHz — well within the Frekvens 3.3V rail headroom.
 
 ### Frekvens Panel Connector
@@ -148,6 +161,7 @@ Frekvens 4V rail ──┬── existing panel supply (shift registers, LEDs)
 | ATtiny1614-SSF (SOIC-14) | 1 | 20 MHz rated, 3.3V operation |
 | 3.5mm TS panel-mount jack (mono) | 2 | PJ-138A/PJ-3502, 6mm hole, nut-mount |
 | 100 nF decoupling capacitor | 1 | ATtiny1614 VCC bypass |
+| 10 kΩ resistor | 1 | **/OE pull-up to 3.3V — required for a reliable cold start** |
 | UPDI 3-pin header (PA0, VCC, GND) | 1 | Leave accessible for reprogramming |
 | SOIC-14 adapter / custom PCB | 1 | ATtiny1614 is SMD only |
 
