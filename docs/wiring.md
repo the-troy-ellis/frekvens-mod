@@ -138,6 +138,27 @@ Frekvens 4V rail ──┬── existing panel supply (shift registers, LEDs)
 | ESP32 peak (WiFi TX burst) | ~240–400 mA |
 | AP2112K-3.3 handles (ESP32 only) | 600 mA rated |
 
+### Known issue: intermittent cold-start
+
+Symptom: on a fully-cold plug-in (unplugged 30+ s) the panel sometimes fails to
+light. A quick unplug/re-plug starts it reliably; another 30+ s wait can fail
+again.
+
+This is **not** a fuse problem. A read-back of a field chip (2026-07-28) confirmed
+BOD is already enabled (BODCFG=0x45 → 2.6 V, continuous), so the chip correctly
+holds in reset until VCC clears 2.6 V. The pattern (quick re-plug works, cold
+fails) is the signature of a slow supply ramp / inrush: on a fully-discharged
+cold start the shared panel-logic 3.3 V rail ramps softly and dwells/sags near
+the 2.6 V threshold, so BOD never releases. A quick re-plug pre-charges the bulk
+caps and the rail snaps up cleanly. Note the ATtiny taps the panel-logic LDO
+(shared with the LED shift registers) and the BOM has only a 100 nF decoupling
+cap — no bulk capacitance on that rail.
+
+To diagnose/fix: (1) meter the 3.3 V rail during a failed cold start — stuck at
+~2.x V confirms it; (2) power the ATtiny alone (ESP32 disconnected) and cold-start
+it ~10× to isolate ESP32/shared-rail inrush; (3) add a ~100 µF bulk cap on the
+ATtiny 3.3 V rail near VCC.
+
 ---
 
 ## Bill of Materials (per panel unit)
