@@ -41,7 +41,18 @@ chip in a reset loop: the panel then refuses to cold-start but comes up fine on
 a quick unplug/replug (the supply's bulk caps carry it through). The pull-up
 holds the drivers blanked until the firmware takes over; `display_init()`
 covers the window from its first instruction by raising /OE before PA5 becomes
-an output and latching a zero frame before enabling the PWM.
+an output, latching a zero frame, and then holding the drivers blanked for a
+further ~200 ms (`OE_SETTLE_MS`) so the rail can finish climbing to 3.3V before
+any LED current is drawn at all.
+
+**Do not repurpose PA0 as an external RESET for this.** It is tempting to wire
+a front-panel button to a reset line and "restart once power is up", but PA0 is
+a single shared pin — UPDI *or* RESET *or* GPIO — so taking RESET costs UPDI
+programming and needs 12V HV-UPDI hardware to undo. It also does not help:
+BOD already holds the chip until VCC is good, and while the part is in reset
+PA5 floats, which is the very condition the pull-up exists to prevent. Holding
+the MCU in reset for longer widens the uncontrolled window rather than closing
+it.
 
 The ATtiny1614 draws ~6 mA at 20 MHz — well within the Frekvens 3.3V rail headroom.
 

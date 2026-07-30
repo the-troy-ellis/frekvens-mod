@@ -2,7 +2,16 @@
 #include "protocol.h"
 #include <avr/io.h>
 #include <avr/interrupt.h>
+#include <util/delay.h>
 #include <string.h>
+
+// How long to hold the LED drivers blanked after reset before enabling /OE, so
+// the panel draws no current while the supply is still ramping. BOD releases
+// the CPU at 2.6V but the rail keeps climbing to 3.3V for a while after that;
+// switching 256 LEDs on during that climb is what dragged it back under the
+// threshold and produced the cold-start reset loop. Generous on purpose — it
+// is a one-time boot cost, paid before the self-test starts.
+#define OE_SETTLE_MS  200
 
 // --- Framebuffers ---
 // Two complete 8-plane framebuffers: 2 × 256 bytes = 512 bytes
@@ -70,6 +79,15 @@ void display_init() {
     front_buf = buf[0];
     tick      = 0;
     spi_send_plane(buf[0]);
+
+    // Let the supply finish ramping before drawing any LED current at all.
+    // Blocking here is deliberate and safe: setup() arms the watchdog only
+    // AFTER this returns, and the UART is not yet listening (the ESP32 takes
+    // seconds to boot and associate), so nothing is missed. _delay_ms is a
+    // compile-time cycle loop, which is what we want with millis() disabled —
+    // TCB0 belongs to the /OE PWM, so there is no timebase to wait on. Chunked
+    // because avr-libc's _delay_ms has a per-call ceiling that scales with F_CPU.
+    for (uint8_t i = 0; i < OE_SETTLE_MS / 10; i++) _delay_ms(10);
 
     // --- Global brightness via hardware PWM on /OE (PA5 = TCB0 WO) ---
     // TCB0 8-bit PWM: period = CCMPL+1 = 256 ticks at CLK_PER (10 MHz) = ~39 kHz.
