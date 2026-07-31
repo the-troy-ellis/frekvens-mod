@@ -35,11 +35,11 @@ means "outputs enabled". Between power-on and the firmware's first instruction
 the ATtiny cannot drive anything — POR, the BOD hold, and the 64 ms startup
 delay all leave PA5 high-impedance — and during that window the SCT2024 shift
 registers still hold power-up garbage. Without the pull-up an arbitrary subset
-of all 256 LEDs switches on at full current for 60+ ms while the supply is
-still ramping, which drags the rail back under the BOD threshold and puts the
-chip in a reset loop: the panel then refuses to cold-start but comes up fine on
-a quick unplug/replug (the supply's bulk caps carry it through). The pull-up
-holds the drivers blanked until the firmware takes over; `display_init()`
+of all 256 LEDs can switch on at full current for 60+ ms while the supply is
+still ramping — the suspected mechanism **B** behind the cold-start failure
+documented under *Known issue* below (not yet confirmed on hardware; the
+measurement that settles it is described there). The pull-up holds the drivers
+blanked until the firmware takes over; `display_init()`
 covers the window from its first instruction by raising /OE before PA5 becomes
 an output, latching a zero frame, and then holding the drivers blanked for a
 further ~200 ms (`OE_SETTLE_MS`) so the rail can finish climbing to 3.3V before
@@ -162,6 +162,53 @@ Frekvens 4V rail ──┬── existing panel supply (shift registers, LEDs)
 | ESP32 peak (WiFi TX burst) | ~240–400 mA |
 | AP2112K-3.3 handles (ESP32 only) | 600 mA rated |
 
+### Known issue: intermittent cold-start
+
+Symptom: on a fully-cold plug-in (unplugged 30+ s) the panel sometimes fails to
+light. A quick unplug/re-plug starts it reliably; another 30+ s wait can fail
+again.
+
+This is **not** a fuse problem. A read-back of a field chip (2026-07-28) confirmed
+BOD is already enabled (2.6 V, continuous), so the chip correctly holds in reset
+until VCC clears 2.6 V. Two things are true and both point at the 3.3 V rail:
+the ATtiny taps the **panel-logic LDO shared with the LED shift registers**, and
+the BOM carried only a 100 nF decoupling cap — **no bulk capacitance at all** on
+that rail.
+
+There are two candidate mechanisms, and they are not mutually exclusive. The
+shared, bulk-less rail is what makes either one bite:
+
+**A — passive slow ramp.** On a fully-discharged cold start the rail ramps
+softly and dwells/sags near 2.6 V, so BOD simply never releases and the chip
+never starts. A quick re-plug pre-charges the caps and the rail snaps up cleanly.
+
+**B — LED inrush knocking the rail back down.** BOD *does* release at 2.6 V, the
+firmware starts, and (before the fix below) `display_init()` drove /OE low while
+the SCT2024 shift registers still held power-up garbage — switching an arbitrary
+subset of all 256 LEDs on at full current into a rail that is still climbing.
+That collapses it back under 2.6 V, BOD resets, /OE floats, the rail recovers,
+and it loops. A quick re-plug rides through on the charged bulk caps.
+
+**The same measurement tells them apart.** Meter (better: scope) the 3.3 V rail
+during a *failed* cold start:
+- sitting flat at ~2.x V and never rising → **A**
+- climbing then repeatedly collapsing → **B**
+
+Fixes, in the order worth trying:
+
+1. **Reflash the ATtiny** (free, no soldering). `display_init()` now raises /OE
+   before PA5 becomes an output, latches a zero frame into the drivers, and holds
+   them blanked for `OE_SETTLE_MS` (~200 ms) before connecting the PWM — so no LED
+   current is drawn while the rail is still climbing. Closes **B** from the
+   firmware's first instruction onward.
+2. **10 kΩ pull-up from /OE to 3.3 V** (see the /OE note above). Closes the ~64 ms
+   window *before* the firmware runs, which it cannot reach itself.
+3. **~100 µF bulk cap on the ATtiny 3.3 V rail, near VCC.** Addresses **A**
+   directly, and gives the rail energy to ride through any residual inrush.
+
+Useful isolation step either way: power the ATtiny alone (ESP32 disconnected) and
+cold-start it ~10× to rule the ESP32's WiFi inrush in or out of the shared rail.
+
 ---
 
 ## Bill of Materials (per panel unit)
@@ -173,6 +220,7 @@ Frekvens 4V rail ──┬── existing panel supply (shift registers, LEDs)
 | 3.5mm TS panel-mount jack (mono) | 2 | PJ-138A/PJ-3502, 6mm hole, nut-mount |
 | 100 nF decoupling capacitor | 1 | ATtiny1614 VCC bypass |
 | 10 kΩ resistor | 1 | **/OE pull-up to 3.3V — required for a reliable cold start** |
+| 100 µF electrolytic/tantalum | 1 | **bulk on the ATtiny 3.3V rail — the rail is shared with the LED drivers and had none** |
 | UPDI 3-pin header (PA0, VCC, GND) | 1 | Leave accessible for reprogramming |
 | SOIC-14 adapter / custom PCB | 1 | ATtiny1614 is SMD only |
 
