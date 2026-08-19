@@ -13,15 +13,15 @@ remap, because the SPI alternate mapping targets a PORTC that the 14-pin package
 
 | Pin | Port | Direction | Connected To |
 |:---:|:---:|:---:|---|
-| 11 | PA1 | OUT | Frekvens **DATA** (SPI0 MOSI, default) |
-| 13 | PA3 | OUT | Frekvens **CLK**  (SPI0 SCK,  default) |
-| 5  | PA7 | OUT | Frekvens **LATCH** (GPIO, pulsed after each scan) |
-| 3  | PA5 | OUT | Frekvens **/OE** (TCB0 WO, ~78 kHz brightness PWM) |
-| 7  | PB2 | OUT | 3.5mm **Tip** — UART TX (USART0 TXD) to downstream unit |
-| 6  | PB3 | IN  | 3.5mm **Tip** — UART RX (USART0 RXD) from upstream / ESP32 |
-| 10 | PA0 | —   | **UPDI** — leave connected to programming header |
-| 1  | VCC | 3.3V | Frekvens internal 3.3V rail |
-| 14 | GND | GND  | Frekvens internal GND |
+| 11 | PA1 | OUT | Frekvens **DATA** (SPI0 MOSI, default) — *yellow* |
+| 13 | PA3 | OUT | Frekvens **CLK**  (SPI0 SCK,  default) — *white* |
+| 5  | PA7 | OUT | Frekvens **LATCH** (GPIO, pulsed after each scan) — *green* |
+| 3  | PA5 | OUT | Frekvens **/OE** (TCB0 WO, ~78 kHz brightness PWM) — *blue* |
+| 7  | PB2 | OUT | 3.5mm **Tip** — UART TX (USART0 TXD) to downstream unit — *green* |
+| 6  | PB3 | IN  | 3.5mm **Tip** — UART RX (USART0 RXD) from upstream / ESP32 — *yellow* |
+| 10 | PA0 | —   | **UPDI** — leave connected to programming header — *white* |
+| 1  | VCC | 3.3V | Frekvens internal 3.3V rail — *red* |
+| 14 | GND | GND  | Frekvens internal GND — *black* |
 | 12 | PA2 | — | SPI0 MISO — leave unconnected (panel is write-only) |
 | 2,4,8,9 | PA4,PA6,PB1,PB0 | — | free for future use |
 
@@ -55,6 +55,62 @@ the MCU in reset for longer widens the uncontrolled window rather than closing
 it.
 
 The ATtiny1614 draws ~6 mA at 20 MHz — well within the Frekvens 3.3V rail headroom.
+
+### Wire colours
+
+Six colours are stocked: **black, white, blue, green (teal), red, yellow** — for
+nine nets. Colours are therefore reused, under one rule:
+
+> **Never reuse a colour within a bundle.** Red and black are reserved for power
+> everywhere and are never a signal.
+
+The reuse is safe because each bundle terminates on a physically different
+connector — the panel bus on the Frekvens JST header, the chain on 3.5 mm panel
+jacks, UPDI on its own 3-pin header — so a mis-plug *between* bundles is
+mechanically impossible, not merely unlikely.
+
+**Reserved — power, everywhere**
+
+| Net | Colour |
+|---|---|
+| 3.3V | **red** |
+| GND | **black** |
+
+**Panel bus** — 4 signals to the Frekvens header; all four must differ
+
+| Signal | Pin | Colour | Mnemonic |
+|---|:---:|---|---|
+| DATA | 11 (PA1) | **yellow** | the payload |
+| CLK | 13 (PA3) | **white** | clock face |
+| LATCH | 5 (PA7) | **green** | go / commit |
+| /OE | 3 (PA5) | **blue** | blanking — the "off" control |
+
+**Chain** — 3.5 mm jack tips (both sleeves are black/GND)
+
+| Signal | Pin | Colour |
+|---|:---:|---|
+| UART TX → **OUT** jack | 7 (PB2) | **green** |
+| UART RX ← **IN** jack | 6 (PB3) | **yellow** |
+
+Swapping TX and RX is the classic daisy-chain error, and the two jacks are
+visually identical once the case is closed — so the wire colour is the only
+thing telling them apart. Green and yellow are the most separable pair of the
+four signal colours under warm workshop light. **Green always lands on OUT.**
+
+**UPDI header** — 3 pins: UPDI, 3.3V, GND
+
+| Signal | Pin | Colour |
+|---|:---:|---|
+| UPDI | 10 (PA0) | **white** |
+
+White is unambiguous inside that header (its only companions are red and
+black). Worth a band of heatshrink or a marker stripe anyway: PA0 is the one
+net where a wiring mistake costs you the ability to reprogram the chip.
+
+**The two cold-start additions** (see *Known issue* below) carry power colours,
+not signal colours: the 10 kΩ /OE pull-up bridges the **blue** /OE net to
+**red** 3.3V, and the 100 µF bulk cap sits **red** (+) to **black** (−) right at
+the ATtiny's VCC/GND pins.
 
 ### Frekvens Panel Connector
 
