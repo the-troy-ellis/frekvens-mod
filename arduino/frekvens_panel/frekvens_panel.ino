@@ -1,3 +1,10 @@
+// Arduino.h declares setup()/loop() inside extern "C" (api/Common.h), which is
+// the linkage the core's main() calls them with. The Arduino IDE injects this
+// include into .ino files automatically; PlatformIO does not do so for .cpp,
+// and without it these definitions get C++ mangled and the link fails with
+// "undefined reference to `setup'". Stated explicitly so both builds agree.
+#include <Arduino.h>
+
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include "display.h"
