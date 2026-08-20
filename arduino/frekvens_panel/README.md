@@ -19,7 +19,7 @@ Keep this in sync with `attiny1614/src/` if you change the firmware there.
 | Startup Time | **64 ms** |
 | millis()/micros() Timer | **Disabled** (frees TCB0 for the /OE brightness PWM) |
 | Programmer | SerialUPDI - 230400 baud (or 57600 if flaky) |
-| Port | your `/dev/cu.usbserial-*` adapter |
+| Port | your USB-serial adapter — Linux `/dev/ttyUSB0`, macOS `/dev/cu.usbserial-*` |
 
 ## Flashing
 
