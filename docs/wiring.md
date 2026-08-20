@@ -58,6 +58,11 @@ The ATtiny1614 draws ~6 mA at 20 MHz — well within the Frekvens 3.3V rail head
 
 ### Wire colours
 
+> **Printable bench card:** [`docs/harness-card.html`](harness-card.html) renders
+> this section as a 2-page A4 reference (pinout, bundles, chain orientation,
+> power detail). Open it in a browser and print. Every colour is named in text
+> as well as shown, so it stays usable on a mono printer.
+
 Six colours are stocked: **black, white, blue, green (teal), red, yellow** — for
 nine nets. Colours are therefore reused, under one rule:
 
@@ -139,9 +144,11 @@ A standard **mono 3.5mm patch cable** connects adjacent units tip-to-tip.
 Power is not carried by the data cable — each unit is self-powered.
 
 ```
-ESP32 GPIO17 ─────────────── Panel 0 IN jack (PA2)
-                              Panel 0 OUT jack (PA1) ──TS──► Panel 1 IN jack (PA2)
-                                                              Panel 1 OUT jack (PA1) ──TS──► ...
+ESP32 TX ──────────────► Panel 0 IN jack   (PB3, pin 6 — ATtiny RX)
+                         Panel 0 OUT jack  (PB2, pin 7 — ATtiny TX)
+                              └──TS──────► Panel 1 IN jack   (PB3, pin 6)
+                                           Panel 1 OUT jack  (PB2, pin 7)
+                                                └──TS──────► ...
 ```
 
 ### Jack sourcing
@@ -156,9 +163,17 @@ Eurorack patch cables are ideal (TS, short lengths, widely available).
 
 | ESP32 Pin | Connected To |
 |:---:|---|
-| GPIO17 (UART2 TX) | Panel 0 IN jack Tip (PA2 RX) |
-| GPIO16 (UART2 RX) | Panel 0 OUT jack Tip (PA1 TX) — optional, diagnostics |
+| UART TX | Panel 0 **IN** jack Tip — PB3, pin 6 (ATtiny RX) |
+| UART RX | Panel 0 **OUT** jack Tip — PB2, pin 7 (ATtiny TX) — optional, diagnostics |
 | GND | Panel 0 GND (signal reference only) |
+
+> **Which GPIOs?** This depends on the ESP32 board, and the repo currently
+> disagrees with itself. The firmware targets a **Seeed XIAO ESP32-S3**
+> (`esp32/platformio.ini`) and uses **GPIO1 = TX, GPIO2 = RX**
+> (`esp32/src/config.h`) — deliberately off the USB-console UART. The BOM below
+> still lists an **ESP32-WROOM-32**, whose UART2 would be GPIO17/GPIO16. Confirm
+> which module is actually in the build and correct the other reference; the
+> ATtiny side (PB3 in / PB2 out) is the same either way.
 
 The ESP32 is powered independently. Its GND shares a reference with Panel 0
 for UART signal levels — a single wire is sufficient.

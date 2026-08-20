@@ -1,0 +1,529 @@
+<title>Frekvens Harness Card</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --paper:#f7f8fa; --sheet:#ffffff;
+  --ink:#1a1f26; --ink-soft:#5a6472; --ink-faint:#8b95a3;
+  --rule:#ccd3dc; --rule-strong:#9aa5b3; --field:#eef1f5;
+  /* Wire hues are DATA, not decoration - identical in both themes. */
+  --w-red:#cf3a2e; --w-black:#0f1317; --w-white:#ffffff;
+  --w-blue:#2f6fd0; --w-green:#0f8e7d; --w-yellow:#e3ab12;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#101318; --sheet:#161a20;
+    --ink:#e7eaef; --ink-soft:#9aa4b2; --ink-faint:#6d7784;
+    --rule:#2b313a; --rule-strong:#454d58; --field:#1b2027;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#101318; --sheet:#161a20;
+  --ink:#e7eaef; --ink-soft:#9aa4b2; --ink-faint:#6d7784;
+  --rule:#2b313a; --rule-strong:#454d58; --field:#1b2027;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+  font-size:14px; line-height:1.5;
+  -webkit-print-color-adjust:exact; print-color-adjust:exact;
+}
+.sheet{max-width:920px;margin:0 auto;padding:28px 26px 56px;background:var(--sheet)}
+.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.cond{font-family:"IBM Plex Sans Condensed","IBM Plex Sans",sans-serif}
+
+/* ---- title block: an engineering drawing header, not a hero ---- */
+.titleblock{border:1.5px solid var(--rule-strong);border-radius:3px;overflow:hidden}
+.tb-main{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;padding:14px 16px 12px}
+.tb-main h1{
+  font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;
+  font-size:30px;line-height:1.02;margin:0;letter-spacing:.005em;text-wrap:balance;
+}
+.tb-main p{margin:5px 0 0;color:var(--ink-soft);font-size:13px;max-width:52ch}
+.tb-badge{
+  flex:none;text-align:right;font-size:10.5px;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--ink-faint);line-height:1.7
+}
+.tb-meta{display:flex;flex-wrap:wrap;border-top:1px solid var(--rule);background:var(--field)}
+.tb-meta div{
+  flex:1 1 auto;min-width:118px;padding:7px 14px;
+  border-right:1px solid var(--rule);font-size:11.5px
+}
+.tb-meta div:last-child{border-right:0}
+.tb-meta b{
+  display:block;font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--ink-faint);font-weight:500;margin-bottom:1px
+}
+
+/* ---- sections ---- */
+section{margin-top:30px}
+h2{
+  font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:12px;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft);
+  margin:0 0 12px;padding-bottom:6px;border-bottom:1px solid var(--rule);
+  display:flex;justify-content:space-between;align-items:baseline;gap:12px
+}
+h2 span{font-weight:500;letter-spacing:.04em;text-transform:none;font-size:12px;color:var(--ink-faint)}
+
+figure{margin:0}
+figure svg{display:block;width:100%;height:auto}
+figcaption{
+  margin-top:9px;font-size:12.5px;color:var(--ink-soft);
+  max-width:76ch;border-left:2px solid var(--rule-strong);padding-left:11px
+}
+
+/* ---- bundle tables ---- */
+.bundles{display:grid;grid-template-columns:repeat(auto-fit,minmax(212px,1fr));gap:14px}
+.bundle{border:1px solid var(--rule);border-radius:3px;overflow:hidden;background:var(--sheet)}
+.bundle h3{
+  margin:0;padding:7px 11px;background:var(--field);border-bottom:1px solid var(--rule);
+  font-family:"IBM Plex Sans Condensed",sans-serif;font-size:12.5px;font-weight:700;
+  letter-spacing:.09em;text-transform:uppercase;
+  display:flex;justify-content:space-between;align-items:center;gap:8px
+}
+.bundle h3 em{
+  font-style:normal;font-family:"IBM Plex Mono",monospace;font-size:9.5px;
+  letter-spacing:.1em;color:var(--ink-faint);font-weight:400
+}
+.bundle p{margin:0;padding:8px 11px 0;font-size:11.5px;color:var(--ink-soft)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+td{padding:5px 11px;border-bottom:1px solid var(--rule)}
+tr:last-child td{border-bottom:0}
+td.sig{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:600}
+td.pin{font-family:"IBM Plex Mono",monospace;color:var(--ink-soft);width:1%;white-space:nowrap;font-size:11.5px}
+td.col{width:1%;white-space:nowrap;text-align:right}
+.chip{display:inline-flex;align-items:center;gap:6px;font-family:"IBM Plex Mono",monospace;font-size:11.5px}
+.sw{width:13px;height:13px;border-radius:2px;border:1px solid var(--rule-strong);flex:none}
+
+/* ---- checklist ---- */
+.checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));gap:0 26px}
+.checks li{margin:0 0 11px;padding-left:2px;font-size:13px;break-inside:avoid}
+.checks ul{margin:0;padding-left:19px}
+.checks b{font-family:"IBM Plex Sans Condensed",sans-serif;letter-spacing:.02em}
+.warn{color:var(--w-red)}
+
+footer{
+  margin-top:34px;padding-top:11px;border-top:1.5px solid var(--rule-strong);
+  font-size:11.5px;color:var(--ink-faint);display:flex;
+  justify-content:space-between;flex-wrap:wrap;gap:10px
+}
+
+@media print{
+  @page{size:A4 portrait;margin:11mm}
+  body{background:#fff;font-size:9.6pt}
+  .sheet{max-width:none;padding:0;background:#fff}
+  section,figure,.bundle,.checks li,table{break-inside:avoid}
+  section{margin-top:17px}
+  h2{margin-bottom:9px}
+  figcaption{font-size:8.8pt;margin-top:6px}
+  /* figures are the tallest elements; 88% still prints ~165mm wide */
+  figure svg{max-width:88%;margin:0 auto}
+  footer{margin-top:20px}
+  .checks li{margin-bottom:8px}
+}
+</style>
+
+<div class="sheet">
+
+  <header class="titleblock">
+    <div class="tb-main">
+      <div>
+        <h1>Frekvens Harness Card</h1>
+        <p>Bench reference for one Frekvens panel unit &mdash; ATtiny1614 pinout, wire
+           colours, chain orientation and the two cold-start parts.</p>
+      </div>
+      <div class="tb-badge">Frekvens&nbsp;Mod<br>Panel&nbsp;Unit<br>1&nbsp;of&nbsp;1</div>
+    </div>
+    <div class="tb-meta mono">
+      <div><b>Device</b>ATtiny1614 &middot; SOIC-14</div>
+      <div><b>Clock</b>10 MHz internal</div>
+      <div><b>Chain link</b>250 kBd &middot; 8N1</div>
+      <div><b>Colours stocked</b>6 &middot; nets 9</div>
+      <div><b>Source</b>docs/wiring.md @ 5a19702</div>
+    </div>
+  </header>
+
+  <section>
+    <h2>1 &mdash; Pin assignment <span>pin 1 at the notch &middot; left side down, right side up</span></h2>
+    <figure>
+      <svg viewBox="0 0 980 540" role="img"
+           aria-label="ATtiny1614 SOIC-14 pinout. Left side pin 1 VCC 3.3 volt red, pin 2 PA4 unused, pin 3 PA5 slash OE blue, pin 4 PA6 unused, pin 5 PA7 LATCH green, pin 6 PB3 UART RX yellow, pin 7 PB2 UART TX green. Right side pin 14 GND black, pin 13 PA3 CLK white, pin 12 PA2 MISO not connected, pin 11 PA1 DATA yellow, pin 10 PA0 UPDI white, pin 9 PB0 unused, pin 8 PB1 unused. Each connected pin is tagged with its bundle: PWR, BUS, CHN or PRG.">
+        <g font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">
+
+          <!-- chip body -->
+          <rect x="395" y="70" width="150" height="420" rx="4"
+                fill="var(--field)" stroke="var(--rule-strong)" stroke-width="1.5"/>
+          <path d="M452,70 A18,18 0 0,0 488,70" fill="var(--sheet)" stroke="var(--rule-strong)" stroke-width="1.5"/>
+          <circle cx="416" cy="96" r="5" fill="var(--ink-soft)"/>
+          <text x="470" y="268" text-anchor="middle" font-family="IBM Plex Sans Condensed, sans-serif"
+                font-size="17" font-weight="700" fill="var(--ink)">ATtiny1614</text>
+          <text x="470" y="288" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)"
+                letter-spacing="1.4">SOIC-14</text>
+
+          <!-- ============ LEFT SIDE : pins 1-7 ============ -->
+          <!-- pin 1 VCC -->
+          <rect x="363" y="96.5" width="32" height="7" fill="var(--w-red)" stroke="var(--ink-soft)" stroke-width=".75"/>
+          <text x="10" y="104" fill="var(--ink-faint)" letter-spacing="1.2">PWR</text>
+          <rect x="74" y="93" width="14" height="14" rx="2" fill="var(--w-red)" stroke="var(--rule-strong)"/>
+          <text x="96" y="104" fill="var(--ink-soft)">red</text>
+          <text x="252" y="105" text-anchor="end" font-family="IBM Plex Sans Condensed, sans-serif"
+                font-size="14" font-weight="600" fill="var(--ink)">3.3 V</text>
+          <text x="308" y="104" text-anchor="end" fill="var(--ink-soft)">VCC</text>
+          <text x="352" y="105" text-anchor="end" font-size="13" font-weight="500" fill="var(--ink)">1</text>
+
+          <!-- pin 2 -->
+          <rect x="363" y="156.5" width="32" height="7" fill="var(--rule)" stroke="var(--rule-strong)" stroke-width=".75"/>
+          <text x="252" y="165" text-anchor="end" font-size="12" fill="var(--ink-faint)">unused</text>
+          <text x="308" y="164" text-anchor="end" fill="var(--ink-faint)">PA4</text>
+          <text x="352" y="165" text-anchor="end" font-size="13" fill="var(--ink-faint)">2</text>
+
+          <!-- pin 3 /OE -->
+          <rect x="363" y="216.5" width="32" height="7" fill="var(--w-blue)" stroke="var(--ink-soft)" stroke-width=".75"/>
+          <text x="10" y="224" fill="var(--ink-faint)" letter-spacing="1.2">BUS</text>
+          <rect x="74" y="213" width="14" height="14" rx="2" fill="var(--w-blue)" stroke="var(--rule-strong)"/>
+          <text x="96" y="224" fill="var(--ink-soft)">blue</text>
+          <text x="252" y="225" text-anchor="end" font-family="IBM Plex Sans Condensed, sans-serif"
+                font-size="14" font-weight="600" fill="var(--ink)">/OE</text>
+          <text x="308" y="224" text-anchor="end" fill="var(--ink-soft)">PA5</text>
+          <text x="352" y="225" text-anchor="end" font-size="13" font-weight="500" fill="var(--ink)">3</text>
+
+          <!-- pin 4 -->
+          <rect x="363" y="276.5" width="32" height="7" fill="var(--rule)" stroke="var(--rule-strong)" stroke-width=".75"/>
+          <text x="252" y="285" text-anchor="end" font-size="12" fill="var(--ink-faint)">unused</text>
+          <text x="308" y="284" text-anchor="end" fill="var(--ink-faint)">PA6</text>
+          <text x="352" y="285" text-anchor="end" font-size="13" fill="var(--ink-faint)">4</text>
+
+          <!-- pin 5 LATCH -->
+          <rect x="363" y="336.5" width="32" height="7" fill="var(--w-green)" stroke="var(--ink-soft)" stroke-width=".75"/>
+          <text x="10" y="344" fill="var(--ink-faint)" letter-spacing="1.2">BUS</text>
+          <rect x="74" y="333" width="14" height="14" rx="2" fill="var(--w-green)" stroke="var(--rule-strong)"/>
+          <text x="96" y="344" fill="var(--ink-soft)">green</text>
+          <text x="252" y="345" text-anchor="end" font-family="IBM Plex Sans Condensed, sans-serif"
+                font-size="14" font-weight="600" fill="var(--ink)">LATCH</text>
+          <text x="308" y="344" text-anchor="end" fill="var(--ink-soft)">PA7</text>
+          <text x="352" y="345" text-anchor="end" font-size="13" font-weight="500" fill="var(--ink)">5</text>
+
+          <!-- pin 6 UART RX -->
+          <rect x="363" y="396.5" width="32" height="7" fill="var(--w-yellow)" stroke="var(--ink-soft)" stroke-width=".75"/>
+          <text x="10" y="404" fill="var(--ink-faint)" letter-spacing="1.2">CHN</text>
+          <rect x="74" y="393" width="14" height="14" rx="2" fill="var(--w-yellow)" stroke="var(--rule-strong)"/>
+          <text x="96" y="404" fill="var(--ink-soft)">yellow</text>
+          <text x="252" y="405" text-anchor="end" font-family="IBM Plex Sans Condensed, sans-serif"
+                font-size="14" font-weight="600" fill="var(--ink)">UART RX &middot; IN</text>
+          <text x="308" y="404" text-anchor="end" fill="var(--ink-soft)">PB3</text>
+          <text x="352" y="405" text-anchor="end" font-size="13" font-weight="500" fill="var(--ink)">6</text>
+
+          <!-- pin 7 UART TX -->
+          <rect x="363" y="456.5" width="32" height="7" fill="var(--w-green)" stroke="var(--ink-soft)" stroke-width=".75"/>
+          <text x="10" y="464" fill="var(--ink-faint)" letter-spacing="1.2">CHN</text>
+          <rect x="74" y="453" width="14" height="14" rx="2" fill="var(--w-green)" stroke="var(--rule-strong)"/>
+          <text x="96" y="464" fill="var(--ink-soft)">green</text>
+          <text x="252" y="465" text-anchor="end" font-family="IBM Plex Sans Condensed, sans-serif"
+                font-size="14" font-weight="600" fill="var(--ink)">UART TX &middot; OUT</text>
+          <text x="308" y="464" text-anchor="end" fill="var(--ink-soft)">PB2</text>
+          <text x="352" y="465" text-anchor="end" font-size="13" font-weight="500" fill="var(--ink)">7</text>
+
+          <!-- ============ RIGHT SIDE : pins 14 down to 8 ============ -->
+          <!-- pin 14 GND -->
+          <rect x="545" y="96.5" width="32" height="7" fill="var(--w-black)" stroke="var(--ink-soft)" stroke-width=".75"/>
+          <text x="588" y="105" font-size="13" font-weight="500" fill="var(--ink)">14</text>
+          <text x="634" y="104" fill="var(--ink-soft)">GND</text>
+          <text x="690" y="105" font-family="IBM Plex Sans Condensed, sans-serif"
+                font-size="14" font-weight="600" fill="var(--ink)">GND</text>
+          <rect x="846" y="93" width="14" height="14" rx="2" fill="var(--w-black)" stroke="var(--rule-strong)"/>
+          <text x="868" y="104" fill="var(--ink-soft)">black</text>
+          <text x="930" y="104" fill="var(--ink-faint)" letter-spacing="1.2">PWR</text>
+
+          <!-- pin 13 CLK -->
+          <rect x="545" y="156.5" width="32" height="7" fill="var(--w-white)" stroke="var(--ink-soft)" stroke-width=".75"/>
+          <text x="588" y="165" font-size="13" font-weight="500" fill="var(--ink)">13</text>
+          <text x="634" y="164" fill="var(--ink-soft)">PA3</text>
+          <text x="690" y="165" font-family="IBM Plex Sans Condensed, sans-serif"
+                font-size="14" font-weight="600" fill="var(--ink)">CLK</text>
+          <rect x="846" y="153" width="14" height="14" rx="2" fill="var(--w-white)" stroke="var(--rule-strong)"/>
+          <text x="868" y="164" fill="var(--ink-soft)">white</text>
+          <text x="930" y="164" fill="var(--ink-faint)" letter-spacing="1.2">BUS</text>
+
+          <!-- pin 12 MISO -->
+          <rect x="545" y="216.5" width="32" height="7" fill="var(--rule)" stroke="var(--rule-strong)" stroke-width=".75"/>
+          <text x="588" y="225" font-size="13" fill="var(--ink-faint)">12</text>
+          <text x="634" y="224" fill="var(--ink-faint)">PA2</text>
+          <text x="690" y="225" font-size="12" fill="var(--ink-faint)">MISO &mdash; leave n/c</text>
+
+          <!-- pin 11 DATA -->
+          <rect x="545" y="276.5" width="32" height="7" fill="var(--w-yellow)" stroke="var(--ink-soft)" stroke-width=".75"/>
+          <text x="588" y="285" font-size="13" font-weight="500" fill="var(--ink)">11</text>
+          <text x="634" y="284" fill="var(--ink-soft)">PA1</text>
+          <text x="690" y="285" font-family="IBM Plex Sans Condensed, sans-serif"
+                font-size="14" font-weight="600" fill="var(--ink)">DATA</text>
+          <rect x="846" y="273" width="14" height="14" rx="2" fill="var(--w-yellow)" stroke="var(--rule-strong)"/>
+          <text x="868" y="284" fill="var(--ink-soft)">yellow</text>
+          <text x="930" y="284" fill="var(--ink-faint)" letter-spacing="1.2">BUS</text>
+
+          <!-- pin 10 UPDI -->
+          <rect x="545" y="336.5" width="32" height="7" fill="var(--w-white)" stroke="var(--ink-soft)" stroke-width=".75"/>
+          <text x="588" y="345" font-size="13" font-weight="500" fill="var(--ink)">10</text>
+          <text x="634" y="344" fill="var(--ink-soft)">PA0</text>
+          <text x="690" y="345" font-family="IBM Plex Sans Condensed, sans-serif"
+                font-size="14" font-weight="600" fill="var(--ink)">UPDI</text>
+          <rect x="846" y="333" width="14" height="14" rx="2" fill="var(--w-white)" stroke="var(--rule-strong)"/>
+          <text x="868" y="344" fill="var(--ink-soft)">white</text>
+          <text x="930" y="344" fill="var(--ink-faint)" letter-spacing="1.2">PRG</text>
+
+          <!-- pin 9 -->
+          <rect x="545" y="396.5" width="32" height="7" fill="var(--rule)" stroke="var(--rule-strong)" stroke-width=".75"/>
+          <text x="588" y="405" font-size="13" fill="var(--ink-faint)">9</text>
+          <text x="634" y="404" fill="var(--ink-faint)">PB0</text>
+          <text x="690" y="405" font-size="12" fill="var(--ink-faint)">unused</text>
+
+          <!-- pin 8 -->
+          <rect x="545" y="456.5" width="32" height="7" fill="var(--rule)" stroke="var(--rule-strong)" stroke-width=".75"/>
+          <text x="588" y="465" font-size="13" fill="var(--ink-faint)">8</text>
+          <text x="634" y="464" fill="var(--ink-faint)">PB1</text>
+          <text x="690" y="465" font-size="12" fill="var(--ink-faint)">unused</text>
+
+          <!-- bundle key -->
+          <text x="10" y="516" font-size="10.5" fill="var(--ink-faint)" letter-spacing=".6">
+            BUNDLE&#160;&#160;PWR power&#160;&middot;&#160;BUS panel bus (JST header)&#160;&middot;&#160;CHN chain (3.5 mm jacks)&#160;&middot;&#160;PRG UPDI header
+          </text>
+        </g>
+      </svg>
+      <figcaption>Colours repeat across bundles and that is intentional &mdash; green is
+        both LATCH and TX, yellow is both DATA and RX, white is both CLK and UPDI.
+        The bundle tag is what disambiguates them, and the bundles land on
+        physically different connectors, so a cross-bundle mis-plug is mechanically
+        impossible rather than merely unlikely.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>2 &mdash; Bundles <span>never reuse a colour inside one bundle</span></h2>
+    <div class="bundles">
+
+      <div class="bundle">
+        <h3>Power <em>PWR</em></h3>
+        <p>Reserved everywhere. Never a signal.</p>
+        <table>
+          <tr><td class="sig">3.3 V</td><td class="pin">pin 1</td>
+              <td class="col"><span class="chip"><span class="sw" style="background:var(--w-red)"></span>red</span></td></tr>
+          <tr><td class="sig">GND</td><td class="pin">pin 14</td>
+              <td class="col"><span class="chip"><span class="sw" style="background:var(--w-black)"></span>black</span></td></tr>
+        </table>
+      </div>
+
+      <div class="bundle">
+        <h3>Panel bus <em>BUS</em></h3>
+        <p>To the Frekvens JST header. All four differ.</p>
+        <table>
+          <tr><td class="sig">DATA</td><td class="pin">11 &middot; PA1</td>
+              <td class="col"><span class="chip"><span class="sw" style="background:var(--w-yellow)"></span>yellow</span></td></tr>
+          <tr><td class="sig">CLK</td><td class="pin">13 &middot; PA3</td>
+              <td class="col"><span class="chip"><span class="sw" style="background:var(--w-white)"></span>white</span></td></tr>
+          <tr><td class="sig">LATCH</td><td class="pin">5 &middot; PA7</td>
+              <td class="col"><span class="chip"><span class="sw" style="background:var(--w-green)"></span>green</span></td></tr>
+          <tr><td class="sig">/OE</td><td class="pin">3 &middot; PA5</td>
+              <td class="col"><span class="chip"><span class="sw" style="background:var(--w-blue)"></span>blue</span></td></tr>
+        </table>
+      </div>
+
+      <div class="bundle">
+        <h3>Chain <em>CHN</em></h3>
+        <p>3.5&nbsp;mm jack tips. Both sleeves are black&nbsp;/&nbsp;GND.</p>
+        <table>
+          <tr><td class="sig">TX &rarr; OUT</td><td class="pin">7 &middot; PB2</td>
+              <td class="col"><span class="chip"><span class="sw" style="background:var(--w-green)"></span>green</span></td></tr>
+          <tr><td class="sig">RX &larr; IN</td><td class="pin">6 &middot; PB3</td>
+              <td class="col"><span class="chip"><span class="sw" style="background:var(--w-yellow)"></span>yellow</span></td></tr>
+        </table>
+      </div>
+
+      <div class="bundle">
+        <h3>UPDI <em>PRG</em></h3>
+        <p>Its own 3-pin header: UPDI, 3.3&nbsp;V, GND.</p>
+        <table>
+          <tr><td class="sig">UPDI</td><td class="pin">10 &middot; PA0</td>
+              <td class="col"><span class="chip"><span class="sw" style="background:var(--w-white)"></span>white</span></td></tr>
+        </table>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>3 &mdash; Chain orientation <span>green always leaves &middot; yellow always arrives</span></h2>
+    <figure>
+      <svg viewBox="0 0 980 236" role="img"
+           aria-label="Chain topology. The ESP32 GPIO1 transmits into panel zero's IN jack which is the yellow RX wire on pin 6. Panel zero's OUT jack, the green TX wire on pin 7, patches to panel one's IN jack, and so on up to four panels. GPIO2 optionally returns from panel zero's OUT for diagnostics.">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor" color="var(--ink-soft)">
+
+          <!-- ESP32 -->
+          <rect x="14" y="66" width="150" height="96" rx="4" fill="var(--field)" stroke="var(--rule-strong)" stroke-width="1.5"/>
+          <text x="89" y="100" text-anchor="middle" font-family="IBM Plex Sans Condensed, sans-serif"
+                font-size="15" font-weight="700" fill="var(--ink)">ESP32-S3</text>
+          <text x="89" y="120" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">coordinator</text>
+          <text x="89" y="141" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">TX GPIO1 &middot; RX GPIO2</text>
+
+          <!-- three panels -->
+          <g>
+            <rect x="252" y="58" width="196" height="112" rx="4" fill="var(--sheet)" stroke="var(--rule-strong)" stroke-width="1.5"/>
+            <text x="350" y="92" text-anchor="middle" font-family="IBM Plex Sans Condensed, sans-serif"
+                  font-size="15" font-weight="700" fill="var(--ink)">PANEL 0</text>
+            <text x="350" y="110" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">ATtiny1614</text>
+            <circle cx="252" cy="140" r="6" fill="var(--w-yellow)" stroke="var(--ink-soft)" stroke-width=".75"/>
+            <text x="266" y="144" font-size="10">IN &middot; pin 6</text>
+            <circle cx="448" cy="140" r="6" fill="var(--w-green)" stroke="var(--ink-soft)" stroke-width=".75"/>
+            <text x="434" y="144" text-anchor="end" font-size="10">pin 7 &middot; OUT</text>
+          </g>
+          <g>
+            <rect x="508" y="58" width="196" height="112" rx="4" fill="var(--sheet)" stroke="var(--rule-strong)" stroke-width="1.5"/>
+            <text x="606" y="92" text-anchor="middle" font-family="IBM Plex Sans Condensed, sans-serif"
+                  font-size="15" font-weight="700" fill="var(--ink)">PANEL 1</text>
+            <text x="606" y="110" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">ATtiny1614</text>
+            <circle cx="508" cy="140" r="6" fill="var(--w-yellow)" stroke="var(--ink-soft)" stroke-width=".75"/>
+            <text x="522" y="144" font-size="10">IN &middot; pin 6</text>
+            <circle cx="704" cy="140" r="6" fill="var(--w-green)" stroke="var(--ink-soft)" stroke-width=".75"/>
+            <text x="690" y="144" text-anchor="end" font-size="10">pin 7 &middot; OUT</text>
+          </g>
+          <g>
+            <rect x="764" y="58" width="196" height="112" rx="4" fill="var(--sheet)" stroke="var(--rule-strong)"
+                  stroke-width="1.5" stroke-dasharray="5 4"/>
+            <text x="862" y="92" text-anchor="middle" font-family="IBM Plex Sans Condensed, sans-serif"
+                  font-size="15" font-weight="700" fill="var(--ink-faint)">PANEL 2&ndash;3</text>
+            <text x="862" y="112" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">up to 4 total</text>
+            <circle cx="764" cy="140" r="6" fill="var(--w-yellow)" stroke="var(--ink-soft)" stroke-width=".75"/>
+          </g>
+
+          <!-- links -->
+          <line x1="164" y1="140" x2="244" y2="140" stroke="currentColor" stroke-width="1.6" marker-end="url(#ar)"/>
+          <text x="204" y="130" text-anchor="middle" font-size="10">frames</text>
+          <line x1="456" y1="140" x2="500" y2="140" stroke="currentColor" stroke-width="1.6" marker-end="url(#ar)"/>
+          <text x="478" y="130" text-anchor="middle" font-size="10">TS lead</text>
+          <line x1="712" y1="140" x2="756" y2="140" stroke="currentColor" stroke-width="1.6" marker-end="url(#ar)"/>
+          <text x="734" y="130" text-anchor="middle" font-size="10">TS lead</text>
+
+          <!-- diagnostic return -->
+          <path d="M448,164 L448,196 L100,196 L100,164" fill="none" stroke="currentColor"
+                stroke-width="1.2" stroke-dasharray="4 4" marker-end="url(#ar)"/>
+          <text x="274" y="210" text-anchor="middle" font-size="10" fill="var(--ink-faint)">
+            optional diagnostic return &rarr; GPIO2
+          </text>
+
+          <text x="14" y="30" font-family="IBM Plex Sans Condensed, sans-serif" font-size="12"
+                font-weight="700" letter-spacing="1.6" fill="var(--ink-soft)">FRAME FLOW &mdash; ONE WAY, 250 kBd</text>
+        </g>
+      </svg>
+      <figcaption>Each unit passes the stream along: bytes arrive at IN (yellow,
+        pin&nbsp;6) and leave through OUT (green, pin&nbsp;7). The lead between units is a
+        plain mono TS patch cable, so the jacks are indistinguishable once the case
+        is shut &mdash; the wire colour inside is the only thing that tells you which is
+        which. <b>Green always lands on OUT.</b></figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>4 &mdash; Power &amp; blanking detail <span>both parts exist to fix the cold start</span></h2>
+    <figure>
+      <svg viewBox="0 0 726 296" role="img"
+           aria-label="Power detail. A 3.3 volt rail runs along the top and ground along the bottom. The ATtiny's VCC pin 1 connects up to the rail and GND pin 14 down to ground. A 10 kilohm resistor pulls slash OE on pin 3 up to the 3.3 volt rail. A 100 nanofarad decoupling capacitor and a 100 microfarad bulk capacitor sit across the rails.">
+        <g font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor" color="var(--ink-soft)">
+
+          <!-- rails -->
+          <line x1="34" y1="52" x2="666" y2="52" stroke="var(--w-red)" stroke-width="3"/>
+          <text x="34" y="42" font-size="11" fill="var(--w-red)">3.3 V</text>
+          <line x1="34" y1="250" x2="666" y2="250" stroke="var(--w-black)" stroke-width="3"/>
+          <text x="34" y="268" font-size="11" fill="var(--ink-soft)">GND</text>
+
+          <!-- chip -->
+          <rect x="276" y="112" width="140" height="78" rx="4" fill="var(--field)" stroke="var(--rule-strong)" stroke-width="1.5"/>
+          <text x="346" y="146" text-anchor="middle" font-family="IBM Plex Sans Condensed, sans-serif"
+                font-size="14" font-weight="700" fill="var(--ink)">ATtiny1614</text>
+          <text x="346" y="164" text-anchor="middle" font-size="10" fill="var(--ink-faint)">panel-logic LDO rail</text>
+
+          <!-- vcc / gnd legs -->
+          <line x1="316" y1="112" x2="316" y2="52" stroke="var(--w-red)" stroke-width="2.4"/>
+          <text x="308" y="100" text-anchor="end" font-size="10">pin 1</text>
+          <line x1="386" y1="190" x2="386" y2="250" stroke="var(--w-black)" stroke-width="2.4"/>
+          <text x="394" y="212" font-size="10">pin 14</text>
+
+          <!-- /OE + pull-up -->
+          <line x1="276" y1="152" x2="170" y2="152" stroke="var(--w-blue)" stroke-width="2.4"/>
+          <circle cx="170" cy="152" r="4" fill="var(--ink)"/>
+          <line x1="170" y1="152" x2="170" y2="126" stroke="var(--w-blue)" stroke-width="2.4"/>
+          <rect x="161" y="86" width="18" height="40" rx="2" fill="var(--sheet)" stroke="var(--ink-soft)" stroke-width="1.5"/>
+          <line x1="170" y1="86" x2="170" y2="52" stroke="var(--w-red)" stroke-width="2.4"/>
+          <text x="152" y="110" text-anchor="end" font-size="11" fill="var(--ink)">10 k&Omega;</text>
+          <text x="152" y="126" text-anchor="end" font-size="9.5" fill="var(--ink-faint)">pull-up</text>
+          <line x1="162" y1="152" x2="96" y2="152" stroke="var(--w-blue)" stroke-width="2.4" marker-end="url(#ar2)"/>
+          <text x="90" y="149" text-anchor="end" font-size="10">to panel /OE</text>
+          <text x="90" y="163" text-anchor="end" font-size="9.5" fill="var(--ink-faint)">pin 3 &middot; PA5</text>
+          <defs>
+            <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--w-blue)"/>
+            </marker>
+          </defs>
+
+          <!-- 100 nF -->
+          <line x1="496" y1="52" x2="496" y2="140" stroke="var(--ink-soft)" stroke-width="1.6"/>
+          <line x1="478" y1="140" x2="514" y2="140" stroke="var(--ink)" stroke-width="2.4"/>
+          <line x1="478" y1="152" x2="514" y2="152" stroke="var(--ink)" stroke-width="2.4"/>
+          <line x1="496" y1="152" x2="496" y2="250" stroke="var(--ink-soft)" stroke-width="1.6"/>
+          <text x="524" y="142" font-size="11" fill="var(--ink)">100 nF</text>
+          <text x="524" y="156" font-size="9.5" fill="var(--ink-faint)">decoupling</text>
+
+          <!-- 100 uF -->
+          <line x1="612" y1="52" x2="612" y2="140" stroke="var(--ink-soft)" stroke-width="1.6"/>
+          <line x1="594" y1="140" x2="630" y2="140" stroke="var(--ink)" stroke-width="2.4"/>
+          <line x1="594" y1="152" x2="630" y2="152" stroke="var(--ink)" stroke-width="2.4"/>
+          <line x1="612" y1="152" x2="612" y2="250" stroke="var(--ink-soft)" stroke-width="1.6"/>
+          <text x="584" y="130" text-anchor="end" font-size="12" fill="var(--w-red)">+</text>
+          <text x="640" y="142" font-size="11" fill="var(--ink)">100 &micro;F</text>
+          <text x="640" y="156" font-size="9.5" fill="var(--ink-faint)">bulk &middot; NEW</text>
+        </g>
+      </svg>
+      <figcaption>/OE is active-low, so a floating line means <em>outputs enabled</em>.
+        The 10&nbsp;k&Omega; keeps the drivers blanked through POR, the BOD hold and the
+        64&nbsp;ms start-up delay &mdash; the whole window in which PA5 is high-impedance and
+        the firmware cannot drive anything. The 100&nbsp;&micro;F is new too: the ATtiny shares
+        the panel-logic LDO with the LED drivers and that rail previously had no bulk
+        capacitance at all.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>5 &mdash; Before you close the case</h2>
+    <div class="checks">
+      <ul>
+        <li><b>Green on OUT.</b> The two jacks are identical from the outside. If the
+            chain runs but panel&nbsp;1 stays dark, this is the first thing to check.</li>
+        <li><b>Band the UPDI wire.</b> White is unambiguous on its own header, but PA0
+            is the one net where a mistake costs you the ability to reprogram the chip.</li>
+        <li><b>Fit the 10&nbsp;k&Omega; before first power-up.</b> Without it the drivers can
+            light power-up garbage for 60+&nbsp;ms while the rail is still climbing.</li>
+        <li><span class="warn"><b>Never burn SYSCFG0 = 0xC8.</b></span> It encodes
+            RSTPINCFG&nbsp;=&nbsp;RESET and disables UPDI; recovery then needs 12&nbsp;V
+            HV programming. Field chips read <span class="mono">0xC5</span>.</li>
+        <li><b>Flash from the Arduino IDE sketch</b>
+            (<span class="mono">arduino/frekvens_panel/</span>). The PlatformIO build
+            for this part has never produced a working binary.</li>
+        <li><b>PA2 stays unconnected.</b> The panel is write-only &mdash; MISO has nowhere
+            to go.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    <span>Source of truth: <span class="mono">docs/wiring.md</span> &middot; firmware pins from
+      <span class="mono">esp32/src/config.h</span></span>
+    <span class="mono">rev 5a19702</span>
+  </footer>
+
+</div>
