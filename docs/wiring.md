@@ -121,7 +121,8 @@ the ATtiny's VCC/GND pins.
 
 The Frekvens panel exposes **DATA**, **CLK**, **LATCH**, **3.3V**, and **GND** on a
 small JST-style header after the original PCB is removed. Refer to
-`frekvens-hacking.pdf` for the exact pinout on your panel revision.
+[`docs/frekvens-hacking.pdf`](frekvens-hacking.pdf) for the exact pinout on your
+panel revision.
 
 The existing inter-unit power connectors and built-in power supply in each unit
 are left completely intact. They continue to power the LED panel and now also
