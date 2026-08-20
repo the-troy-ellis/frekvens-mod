@@ -3,8 +3,14 @@
 # Flash with: esphome run frekvens_array.yaml
 #
 # NOTE: This is the ESPHome alternative to the custom Arduino firmware.
-# It provides HA integration + OTA but does NOT include the full web UI.
-# For the full web UI, use the PlatformIO firmware in ../esp32/
+# It provides HA integration + OTA but does NOT include the full web UI,
+# the effects/games/zones engines, or Raid 16.
+# For any of that, use the PlatformIO firmware in ../esp32/
+#
+# Board and link settings track esp32/src/config.h — a Seeed XIAO ESP32-S3
+# talking to the ATtiny1614 chain on D0/D1 at 250 kBd. This path is kept in
+# sync on paper but is not exercised by the host tests, so treat it as
+# untested against current panel firmware.
 
 substitutions:
   device_name: frekvens-array
@@ -18,7 +24,7 @@ esphome:
     - frekvens_component.h
 
 esp32:
-  board: esp32dev
+  board: seeed_xiao_esp32s3
   framework:
     type: arduino
 
@@ -61,12 +67,14 @@ wifi:
 
 captive_portal:
 
-# UART to ATtiny85 chain
+# UART to the ATtiny1614 panel chain.
+# Must match esp32/src/config.h and attiny1614/src/uart.cpp: the XIAO exposes
+# these as D0/D1, and the panel firmware runs the link at 250 kBd.
 uart:
   id: chain_uart
-  tx_pin: GPIO17
-  rx_pin: GPIO16
-  baud_rate: 115200
+  tx_pin: GPIO1
+  rx_pin: GPIO2
+  baud_rate: 250000
 
 # Custom component drives the panel chain
 custom_component:

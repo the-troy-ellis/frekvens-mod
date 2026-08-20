@@ -3,13 +3,14 @@
 // Include path is set via esphome: includes: [frekvens_component.h]
 //
 // Provides:
-//   FrekvensComponent  — drives the ATtiny85 chain over UART
+//   FrekvensComponent  — drives the ATtiny1614 panel chain over UART
 //   FrekvensLight      — wraps it as an ESPHome LightOutput (brightness + on/off)
 
 #include "esphome.h"
 #include <string.h>
 
-// Protocol constants (must match ATtiny85 firmware)
+// Protocol constants — must match esp32/src/protocol_shared.h and the
+// ATtiny1614 firmware in attiny1614/src/protocol.h (verified identical).
 static const uint8_t FRK_MAGIC_0  = 0xFE;
 static const uint8_t FRK_MAGIC_1  = 0xED;
 static const uint8_t FRK_FRAME    = 0x01;

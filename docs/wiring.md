@@ -144,7 +144,7 @@ A standard **mono 3.5mm patch cable** connects adjacent units tip-to-tip.
 Power is not carried by the data cable — each unit is self-powered.
 
 ```
-ESP32 TX ──────────────► Panel 0 IN jack   (PB3, pin 6 — ATtiny RX)
+XIAO D0/GPIO1 (TX) ────► Panel 0 IN jack   (PB3, pin 6 — ATtiny RX)
                          Panel 0 OUT jack  (PB2, pin 7 — ATtiny TX)
                               └──TS──────► Panel 1 IN jack   (PB3, pin 6)
                                            Panel 1 OUT jack  (PB2, pin 7)
@@ -163,17 +163,14 @@ Eurorack patch cables are ideal (TS, short lengths, widely available).
 
 | ESP32 Pin | Connected To |
 |:---:|---|
-| UART TX | Panel 0 **IN** jack Tip — PB3, pin 6 (ATtiny RX) |
-| UART RX | Panel 0 **OUT** jack Tip — PB2, pin 7 (ATtiny TX) — optional, diagnostics |
+| **D0 / GPIO1** — UART TX | Panel 0 **IN** jack Tip — PB3, pin 6 (ATtiny RX) |
+| **D1 / GPIO2** — UART RX | Panel 0 **OUT** jack Tip — PB2, pin 7 (ATtiny TX) — optional, diagnostics |
 | GND | Panel 0 GND (signal reference only) |
 
-> **Which GPIOs?** This depends on the ESP32 board, and the repo currently
-> disagrees with itself. The firmware targets a **Seeed XIAO ESP32-S3**
-> (`esp32/platformio.ini`) and uses **GPIO1 = TX, GPIO2 = RX**
-> (`esp32/src/config.h`) — deliberately off the USB-console UART. The BOM below
-> still lists an **ESP32-WROOM-32**, whose UART2 would be GPIO17/GPIO16. Confirm
-> which module is actually in the build and correct the other reference; the
-> ATtiny side (PB3 in / PB2 out) is the same either way.
+The coordinator is a **Seeed XIAO ESP32-S3**. It exposes GPIOs by "D" number,
+so the pins above are **D0 = GPIO1 (TX)** and **D1 = GPIO2 (RX)** — chosen
+deliberately to stay off UART0, which is the USB console (D6/D7). The link runs
+at **250 kBd**; see `esp32/src/config.h`, which is the authority for both.
 
 The ESP32 is powered independently. Its GND shares a reference with Panel 0
 for UART signal levels — a single wire is sufficient.
@@ -299,7 +296,7 @@ cold-start it ~10× to rule the ESP32's WiFi inrush in or out of the shared rail
 
 | Component | Qty | Notes |
 |---|:---:|---|
-| ESP32-WROOM-32 module | 1 | Bare module, 18×25mm |
+| Seeed XIAO ESP32-S3 | 1 | 21×17.5mm; UART on D0/D1, USB-C for flashing |
 | AP2112K-3.3 LDO (SOT-23-5) | 1 | 4V → 3.3V for ESP32, 600 mA rated |
 | 100 nF + 10 µF caps | 2 | LDO input/output bypass |
 

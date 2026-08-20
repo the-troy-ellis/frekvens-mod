@@ -257,7 +257,7 @@ provisioning AP (custom firmware only). For ESPHome, re-flash with updated `secr
 ```bash
 # Custom firmware
 cd esp32
-pio run --env esp32dev_ota --target upload   # uploads over WiFi to frekvens.local
+pio run --env xiao_esp32s3_ota --target upload   # uploads over WiFi to frekvens.local
 
 # ESPHome
 cd esphome
